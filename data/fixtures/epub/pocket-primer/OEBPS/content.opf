@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="bookid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf">
+    <dc:title>The Pocket Endgame Primer</dc:title>
+    <dc:creator opf:role="aut">Hester Quill</dc:creator>
+    <dc:language>en</dc:language>
+    <dc:identifier id="bookid">urn:uuid:5f0c2c1e-8d0a-4f6b-9a57-2c4d6f1b9e30</dc:identifier>
+    <dc:rights>Written as a test fixture and dedicated to the public domain under CC0 1.0</dc:rights>
+    <meta name="cover" content="cover-image"/>
+  </metadata>
+  <manifest>
+    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+    <item id="css" href="styles/book.css" media-type="text/css"/>
+    <item id="cover-image" href="images/cover.png" media-type="image/png"/>
+    <item id="square" href="images/square.png" media-type="image/png"/>
+    <item id="reti" href="images/reti.svg" media-type="image/svg+xml"/>
+    <item id="philidor" href="images/philidor.jpg" media-type="image/jpeg"/>
+    <item id="club" href="images/club.png" media-type="image/png"/>
+    <item id="exercise1" href="images/exercise1.gif" media-type="image/gif"/>
+    <item id="exercise2" href="images/exercise2.png" media-type="image/png"/>
+    <item id="to-move" href="images/to-move.png" media-type="image/png"/>
+    <!-- Deliberately not in reading order: the spine decides that. -->
+    <item id="index" href="text/index.xhtml" media-type="application/xhtml+xml"/>
+    <item id="chapter02" href="text/chapter02.xhtml" media-type="application/xhtml+xml"/>
+    <item id="chapter01" href="text/chapter01.xhtml" media-type="application/xhtml+xml"/>
+    <item id="cover" href="text/cover.xhtml" media-type="application/xhtml+xml"/>
+    <item id="title" href="text/title.xhtml" media-type="application/xhtml+xml"/>
+    <item id="also-by" href="text/also-by.xhtml" media-type="application/xhtml+xml"/>
+    <item id="contents" href="text/contents.xhtml" media-type="application/xhtml+xml"/>
+    <item id="preface" href="text/preface.xhtml" media-type="application/xhtml+xml"/>
+    <item id="how-to-use" href="text/how-to-use.xhtml" media-type="application/xhtml+xml"/>
+    <item id="exercises" href="text/exercises.xhtml" media-type="application/xhtml+xml"/>
+    <item id="solutions" href="text/solutions.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine toc="ncx">
+    <itemref idref="cover"/>
+    <itemref idref="title"/>
+    <itemref idref="also-by"/>
+    <itemref idref="contents"/>
+    <itemref idref="preface"/>
+    <itemref idref="how-to-use"/>
+    <itemref idref="chapter01"/>
+    <itemref idref="chapter02"/>
+    <itemref idref="exercises"/>
+    <itemref idref="solutions"/>
+    <itemref idref="index"/>
+  </spine>
+  <guide>
+    <reference type="cover" title="Cover" href="text/cover.xhtml"/>
+    <reference type="toc" title="Contents" href="text/contents.xhtml"/>
+  </guide>
+</package>

@@ -1,0 +1,65 @@
+# The evaluation's slices, each run on a clipped source: pages of a book in the local manifest,
+# data/local/manifest.toml (its shape: data/local/manifest.example.toml), cut by
+# experiments/cut.py into data/local/cuts/. Each slice has a truth, a reference PGN built and
+# checked by hand. Cuts and truths hold the books' words, so both stay local, under data/local/,
+# which is not tracked.
+
+# The output conventions every session asks for, as a user might; pgnify's instructions leave
+# conventions to the user.
+conventions = """An exercise and its solution, wherever the book prints the solution, as one game: \
+the exercise's position, then the solution's moves. Round, "chapter.game" as the book numbers \
+them, "?" for what it does not number. ChapterName, the chapter's title."""
+
+[cuts.workbook-forks]
+source = "everyones-first-chess-workbook"
+# Chapter 5, Forks, and Part IV, Solutions to Exercises.
+pages = [[175, 227], [862, 957]]
+
+[cuts.logical-chess-14]
+source = "logical-chess"
+# Game 14 alone.
+pages = [[137, 148]]
+
+[cuts.logical-chess-12]
+source = "logical-chess"
+# Game 12 alone.
+pages = [[122, 128]]
+
+[cuts.wct-skewer]
+source = "winning-chess-tactics"
+# Chapter Four, The Skewer, printed pages 47 to 49, and Chapter Twenty-Four, Solutions to Tests
+# from Part 1, printed pages 205 to 221.
+pages = [[54, 56], [201, 217]]
+
+# The part each slice's prompt names, in the book's own terms, and its truth.
+
+[slices.workbook-rook-forks]
+cut = "workbook-forks"
+part = "Chapter 5, Forks: the rook forks, with the solutions to their exercises"
+# The part as a real-client session asks for it, in the whole book
+# (experiments/client_session.py).
+client_part = "the rook forks in Chapter 5, Forks, with their examples, their exercises and the solutions to those exercises"
+truth = "data/local/truth/workbook-rook-forks.pgn"
+
+[slices.logical-chess-14]
+cut = "logical-chess-14"
+part = "Game 14, Tarrasch – Mieses, Berlin 1916, with all its notes"
+truth = "data/local/truth/logical-chess-14.pgn"
+
+[slices.wct-skewer]
+cut = "wct-skewer"
+part = "Chapter Four, The Skewer, with the solutions to its tests"
+truth = "data/local/truth/wct-skewer.pgn"
+
+# Game 12, a game with 20 variations given in its notes.
+[slices.logical-chess-12]
+cut = "logical-chess-12"
+part = "Game 12, Pitschak – Flohr, Liebwerda 1934, with all its notes"
+truth = "data/local/truth/logical-chess-12.pgn"
+
+# A smoke test of one exercise, to check the session launcher, the clipped source and the tools.
+# Scored against the rook forks' truth, of which it should find one game.
+[slices.workbook-smoke]
+cut = "workbook-forks"
+part = "Chapter 5, Forks: Exercise 126, with its solution"
+truth = "data/local/truth/workbook-rook-forks.pgn"

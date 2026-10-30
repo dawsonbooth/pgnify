@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+  <head>
+    <meta name="dtb:uid" content="urn:uuid:5f0c2c1e-8d0a-4f6b-9a57-2c4d6f1b9e30"/>
+    <meta name="dtb:depth" content="2"/>
+  </head>
+  <docTitle><text>The Pocket Endgame Primer</text></docTitle>
+  <navMap>
+    <navPoint id="title" playOrder="1">
+      <navLabel><text>Title Page</text></navLabel>
+      <content src="text/title.xhtml"/>
+    </navPoint>
+    <navPoint id="contents" playOrder="2">
+      <navLabel><text>Contents</text></navLabel>
+      <content src="text/contents.xhtml"/>
+    </navPoint>
+    <navPoint id="preface" playOrder="3">
+      <navLabel><text>Preface</text></navLabel>
+      <content src="text/preface.xhtml"/>
+    </navPoint>
+    <navPoint id="how-to-use" playOrder="4">
+      <navLabel><text>How to Use This Book</text></navLabel>
+      <content src="text/how-to-use.xhtml"/>
+    </navPoint>
+    <navPoint id="chapter01" playOrder="5">
+      <navLabel><text>Chapter 1 The Square of the Pawn</text></navLabel>
+      <content src="text/chapter01.xhtml"/>
+      <navPoint id="drawing" playOrder="6">
+        <navLabel><text>1.1 Drawing the Square</text></navLabel>
+        <content src="text/chapter01.xhtml#drawing"/>
+      </navPoint>
+      <navPoint id="reti" playOrder="7">
+        <navLabel><text>1.2 The Réti Manoeuvre</text></navLabel>
+        <content src="text/chapter01.xhtml#reti"/>
+      </navPoint>
+    </navPoint>
+    <navPoint id="chapter02" playOrder="8">
+      <navLabel><text>Chapter 2 Philidor’s Defence</text></navLabel>
+      <content src="text/chapter02.xhtml"/>
+    </navPoint>
+    <navPoint id="exercises" playOrder="9">
+      <navLabel><text>Exercises</text></navLabel>
+      <content src="text/exercises.xhtml"/>
+    </navPoint>
+    <navPoint id="solutions" playOrder="10">
+      <navLabel><text>Solutions</text></navLabel>
+      <content src="text/solutions.xhtml"/>
+    </navPoint>
+    <navPoint id="index" playOrder="11">
+      <navLabel><text>Index</text></navLabel>
+      <content src="text/index.xhtml"/>
+    </navPoint>
+  </navMap>
+</ncx>

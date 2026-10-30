@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+
+# The books, the clipped sources and the reference PGNs made from them, which hold the books'
+# text, and the evaluation's runs. data/local/manifest.example.toml shows the manifest's shape.
+data/local/*
+!data/local/manifest.example.toml
+experiments/results/
+
+# A copy of the diagram reader's weights a checkout may keep, which the live tests and the
+# experiments use when it is there. `pgnify setup` installs them in ~/.cache/pgnify.
+models/
+
+# The private research record and working notes, which quote the books.
+private/
+.scratch/
+
+# Claude Code's settings, and the agent instructions and glossary used in building pgnify.
+.claude/
+AGENTS.md
+CONTEXT.md
+docs/agents/
+
+# Editors and macOS
+.DS_Store
+.idea/
+.vscode/

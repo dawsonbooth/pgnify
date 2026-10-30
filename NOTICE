@@ -1,0 +1,85 @@
+pgnify
+Copyright (C) 2026 Dawson Booth
+
+pgnify is free software: you can redistribute it and/or modify it under the terms of the GNU
+Affero General Public License as published by the Free Software Foundation, either version 3 of
+the License, or (at your option) any later version. It is distributed in the hope that it will
+be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License, in LICENSE, for
+more details.
+
+pgnify is under the AGPL because it uses PyMuPDF (AGPL-3.0, or Artifex's commercial licence)
+and python-chess (GPL-3.0-or-later).
+
+
+CODE INCLUDED IN PGNIFY
+
+src/pgnify/recogniser/chess_diagram_to_fen/ holds the reading code of Chess_diagram_to_FEN,
+https://github.com/tsoj/Chess_diagram_to_FEN, at commit
+3d751125357ebd47b91f6a8168e0b8d513fe7aae. Copyright (c) 2024 Jost Triller, under the MIT
+licence in that folder's LICENSE. The README in that folder says what pgnify changed.
+
+
+NOT INCLUDED
+
+- The diagram reader's weights. `pgnify setup` downloads them from Chess_diagram_to_FEN's
+  release 1.0, or copies them from a folder the user gives, and checks each file against the
+  SHA-256 that src/pgnify/weights.py pins. pgnify does not distribute them.
+- Books. pgnify reads only the files its user points it at, and its repository and packages
+  hold no published book, no PGN made from one and no other text of one. The only book they
+  hold, the test book data/fixtures/epub/pocket-primer/, was written as a test fixture and is
+  dedicated to the public domain under CC0 1.0.
+
+
+DEPENDENCIES
+
+pgnify's package declares the dependencies below, and the rest come with them. An installer
+fetches each from PyPI, and pgnify's packages include none of them. The versions are those
+uv.lock held on 2026-10-28, and each licence is the one the package declares.
+
+Core:
+
+  PyMuPDF 2.0                AGPL-3.0, or Artifex's commercial licence. It includes MuPDF and
+                             the libraries MuPDF builds on, under their own licences.
+  python-chess 1.11.2        GPL-3.0-or-later
+  mcp 2.3.0, mcp-types       MIT
+  Typer 0.27.3               MIT
+  and what those depend on:
+    annotated-doc, annotated-types, anyio, attrs, cffi (MIT-0), h11, jsonschema,
+    jsonschema-specifications, markdown-it-py, mdurl, onnxruntime, pydantic, pydantic-core,
+    pyjwt, PyYAML, referencing, rich, rpds-py, tabulate, truststore, typing-inspection:
+                             MIT
+    click, httpcore2, httpx2, idna, networkx, protobuf, psutil, pycparser, sse-starlette,
+    starlette, uvicorn:      BSD-3-Clause
+    numpy                    BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0
+    Pygments                 BSD-2-Clause
+    cryptography             Apache-2.0 OR BSD-3-Clause
+    packaging                Apache-2.0 OR BSD-2-Clause
+    flatbuffers, opentelemetry-api, python-multipart:
+                             Apache-2.0
+    shellingham              ISC
+    typing-extensions        PSF-2.0
+    pymupdf-layout, pymupdf4llm
+                             empty packages PyMuPDF 2.0 requires, with no code
+    on Windows, colorama (BSD-3-Clause) and pywin32 (PSF-2.0); on Emscripten,
+    httpx2-jsfetch (BSD-3-Clause)
+
+The diagrams extra, pgnify[diagrams]:
+
+  PyTorch 2.15.0             BSD-3-Clause, with code under Apache-2.0, BSD-2-Clause, BSL-1.0,
+                             ISC, MIT and Zlib
+  torchvision 0.29.2         BSD-3-Clause
+  opencv-python-headless 5.0.0.93
+                             Apache-2.0. Its wheels include FFmpeg, under the LGPL-2.1.
+  scikit-image 0.26.0        BSD-3-Clause
+  Pillow 13.0.0              MIT-CMU
+  numpy                      as above
+  and what those depend on:
+    filelock, setuptools:    MIT
+    fsspec, Jinja2, lazy-loader, MarkupSafe, mpmath, SciPy, SymPy, tifffile:
+                             BSD-3-Clause
+    imageio                  BSD-2-Clause
+    on Linux, PyTorch's wheels from PyPI also bring NVIDIA's CUDA libraries, the nvidia-*
+    packages, under NVIDIA's proprietary licence agreements; cuda-toolkit, a meta-package that
+    depends on them and declares no licence; cuda-bindings and cuda-pathfinder, under
+    Apache-2.0; and Triton, under MIT.

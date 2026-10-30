@@ -1,0 +1,93 @@
+[project]
+name = "pgnify"
+version = "0.1.0.dev0"
+description = "An MCP toolkit for converting chess books into faithful PGN with your own AI assistant"
+readme = "README.md"
+license = "AGPL-3.0-or-later"
+license-files = ["LICENSE", "NOTICE", "src/pgnify/recogniser/chess_diagram_to_fen/LICENSE"]
+authors = [{ name = "Dawson Booth" }]
+keywords = ["chess", "pgn", "mcp", "pdf", "epub"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Games/Entertainment :: Board Games",
+]
+requires-python = ">=3.13"
+dependencies = [
+    "chess>=1.11",
+    "mcp>=2.3,<3",
+    # Not 1.x: on MuPDF 1.28.2 it squeezes an EPUB picture sized by a percentage of its height
+    # into the space left on its page, and one book keeps only a third of its pictures. MuPDF
+    # 1.28.3 to 1.28.5, in PyMuPDF 2.0, also fix memory-safety bugs in reading books. See
+    # docs/architecture.md, "Dependencies and licence".
+    "pymupdf>=2.0",
+    "typer>=0.16",
+]
+
+[project.optional-dependencies]
+# The diagram reader: PyTorch and what Chess_diagram_to_FEN's reading code imports, about
+# 850 MB on macOS.
+diagrams = [
+    "numpy>=2.4",
+    "opencv-python-headless>=4.13",
+    "pillow>=12.1",
+    "scikit-image>=0.26",
+    "torch>=2.10",
+    "torchvision>=0.25",
+]
+
+[project.urls]
+Homepage = "https://github.com/dawsonbooth/pgnify"
+Repository = "https://github.com/dawsonbooth/pgnify"
+Issues = "https://github.com/dawsonbooth/pgnify/issues"
+
+[project.scripts]
+pgnify = "pgnify.cli:app"
+
+[dependency-groups]
+dev = ["pytest>=9", "ruff>=0.16", "ty>=0.0.74"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pgnify"]
+
+# The package, its tests and their CC0 test book, the plugin, the README and the licences. No
+# books, truths, run outputs or experiments.
+[tool.hatch.build.targets.sdist]
+only-include = [
+    "src/pgnify",
+    "plugin",
+    ".claude-plugin",
+    "tests",
+    "data/fixtures",
+    "README.md",
+    "LICENSE",
+    "NOTICE",
+    "pyproject.toml",
+]
+exclude = ["**/__pycache__"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+# The vendored reader keeps upstream's code style.
+extend-exclude = ["src/pgnify/recogniser/chess_diagram_to_fen"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "N", "SIM", "RUF"]
+
+
+[tool.ty.src]
+# The diagram reader imports what only the diagrams extra installs.
+exclude = ["src/pgnify/recogniser"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-m 'not live'"
+markers = ["live: needs the diagram reader and its weights"]

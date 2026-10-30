@@ -1,0 +1,28 @@
+/* Headings the contents do not list are told apart by style alone: p.subhead
+   and p.group are bold and larger than the body text. p.note-title would be
+   too, but the style on the one note title makes it smaller. */
+
+body { font-family: Georgia, serif; font-size: 100%; }
+h1 { font-size: 1.6em; }
+h2 { font-size: 1.3em; }
+h3 { font-size: 1.1em; }
+p { margin: 0; text-indent: 1.2em; }
+p.first, p.label, p.solution { text-indent: 0; }
+
+p.chapter-number { font-weight: bold; font-size: 1em; text-align: center; }
+p.subhead { font: bold 1.25em/1.3 sans-serif; margin-top: 1em; }
+p.group { font-weight: bold; font-size: 120%; }
+p.moves { font-weight: bold; text-indent: 0; }
+p.label { font-weight: bold; }
+p.caption { font-size: 0.9em; font-style: italic; text-align: center; }
+
+div.note { border: 1px solid #999; padding: 0.5em; }
+p.note-title { font-weight: 700; font-size: 125%; }
+p.note { font-size: 0.9em; }
+
+.figurine { font-family: "Figurine Sans", sans-serif; }
+img.icon { height: 1em; }
+
+@media amzn-kf8 {
+  p.subhead { font-size: 1.2em; }
+}

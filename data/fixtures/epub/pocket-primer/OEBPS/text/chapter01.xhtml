@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <title>Chapter 1</title>
+  <link rel="stylesheet" type="text/css" href="../styles/book.css"/>
+</head>
+<body>
+  <h1 class="chapter">Chapter 1<br/>The Square of the Pawn</h1>
+  <p class="first">A passed pawn that nothing can block turns the game into a race. Before you work out a single move, you can often tell who wins that race by drawing one imaginary square on the board.</p>
+
+  <h2 id="drawing">1.1 Drawing the Square</h2>
+  <p class="first">Draw a line from the pawn to the square it will promote on, and use it as one side of a square drawn towards the defending king. A pawn on a4 is four moves from a8, so its square runs from a4 to e4, e8 and a8. If the defending king is to move and can step into that square, it catches the pawn. If it cannot, the pawn promotes.</p>
+  <p>The square shrinks every time the pawn moves. After the pawn goes from a4 to a5 it needs only three more moves, and the square becomes a5 to d5, d8 and a8. So with the pawn’s side to move, advance the pawn one square in your head and draw the square from there.</p>
+  <p>The rule works because the king and the pawn both move one step at a time. A king crosses the board diagonally as fast as it walks along a file, so it can cut across the square towards the pawn’s path. Once it is inside the square it can always reach that path in time.</p>
+  <p>There is one exception at the start. A pawn on its starting rank can advance two squares at once, so a pawn on a2 has the same square as a pawn on a3. Draw the square from a3 until the pawn has moved.</p>
+  <div class="diagram">
+    <img src="../images/square.png" alt="Diagram 1"/>
+    <p class="caption">Black to move draws; White to move wins</p>
+  </div>
+  <p>In the diagram the black king on f5 stands just outside the square of the pawn on a4. On Black’s turn the king steps in with Ke5 and catches the pawn in time. On White’s turn the pawn moves first and shrinks the square before the king can reach it.</p>
+  <p>With White to move the race goes like this:</p>
+  <p class="moves"><b>1.a5! Ke6 2.a6 Kd7 3.a7 Kc7 4.a8=Q</b></p>
+  <p>The king reaches c7, one step short of guarding a8, and the pawn queens. One tempo decided the race.</p>
+  <ul>
+    <li>Count how many moves the pawn needs to promote.</li>
+    <li>Draw the square from the pawn towards the defending king.</li>
+    <li>Check whose turn it is before you decide.</li>
+  </ul>
+  <p>Beginners often forget the attacking king. If the stronger side’s own king stands in the way, the defending king may have to walk around it, and a king that starts inside the square can still arrive too late.</p>
+  <p>The same test tells the defender when to give up the chase. If the square is out of reach, the king should turn back towards the other side of the board and fight for the remaining pawns.</p>
+  <p>When both sides have passed pawns, count both races before you push either. The side that queens first often wins, but a new queen that arrives with check, or that can stop the enemy pawn at once, changes the count. Work out who promotes first, then look at the position that results before you commit to the race.</p>
+  <p>Some positions give the defending king a choice of routes. It can head for the promotion square or for a square beside the pawn, and a king that has to walk around its own pawns may lose the tempo it needed. Try the square on each route in turn: if one of them brings the king inside the square in time, the pawn is caught. Count the routes again if the attacking king can shoulder the defender away from the square.</p>
+  <p>The square only counts moves. It says nothing about stalemate, about other pieces, or about a king that could take the pawn only by stepping into check. Use it to see at a glance whether a race is worth calculating.</p>
+
+  <h2><a id="reti"></a>1.2 The Réti Manoeuvre</h2>
+  <p class="first">Sometimes a king outside the square can still stop the pawn by doing two jobs at once. Richard Réti showed this in a famous study of 1921.</p>
+  <div class="diagram">
+    <img src="../images/reti.svg" alt="Diagram 2"/>
+    <p class="caption">White to move draws</p>
+  </div>
+  <p>White’s king on h8 is outside the square of the black pawn on h5, and White’s own pawn on c6 is about to fall to the king on a6.</p>
+  <p class="moves"><b>1.Kg7! h4 2.Kf6 Kb6</b></p>
+  <p>If Black pushes with 2...h3 instead, White plays 3.Ke7 h2 4.c7 Kb7 5.Kd7 and both sides queen.</p>
+  <h3>Why the Diagonal Helps</h3>
+  <p class="first">The white king walks down the long diagonal, and every step brings it closer both to the h-pawn and to its own pawn on c6. Black cannot deal with both threats in time.</p>
+  <p class="moves"><b>3.Ke5! Kxc6 4.Kf4 h3 5.Kg3 h2 6.Kxh2</b></p>
+  <p>The king enters the square of the h-pawn just in time and the game is drawn.</p>
+</body>
+</html>

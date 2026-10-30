@@ -1,0 +1,6 @@
+# The books the evaluation reads (experiments/). Copy this file to manifest.toml, which is
+# gitignored, and point each source at a book outside the repository.
+
+[[source]]
+name = "everyones-first-chess-workbook"
+book = "/path/to/Everyone's First Chess Workbook.epub"

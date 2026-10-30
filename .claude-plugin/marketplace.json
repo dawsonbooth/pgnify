@@ -1,0 +1,14 @@
+{
+  "name": "pgnify",
+  "owner": {
+    "name": "Dawson Booth"
+  },
+  "description": "A skill for converting chess books into faithful PGN with pgnify's MCP server.",
+  "plugins": [
+    {
+      "name": "pgnify",
+      "source": "./plugin",
+      "description": "Instructions for converting chess books into faithful PGN with pgnify's MCP server. Install the server with uv: https://github.com/dawsonbooth/pgnify"
+    }
+  ]
+}
