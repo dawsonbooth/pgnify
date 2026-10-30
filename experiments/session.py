@@ -97,6 +97,8 @@ def prepare(slice_name: str) -> tuple[Path, list[str], dict[str, str]]:
     source = cut_file(spec["cut"])
     cut_from = book(cut_spec["source"])
     version = claude_version()
+    if not version.startswith(PINNED):
+        sys.exit(f"Claude Code is {version!r}; the evaluation pins {PINNED}")
     folder = RESULTS / slice_name / CONFIG / datetime.now().strftime("%Y%m%dT%H%M%S")
     work = folder / "work"
     work.mkdir(parents=True)
@@ -200,11 +202,8 @@ def cut_file(cut: str) -> Path:
 
 
 def claude_version() -> str:
-    """The version of Claude Code, which must be the release the evaluation pins."""
-    version = subprocess.run(["claude", "--version"], capture_output=True, text=True).stdout.strip()
-    if not version.startswith(PINNED):
-        sys.exit(f"Claude Code is {version!r}; the evaluation pins {PINNED}")
-    return version
+    """The version of Claude Code installed, as `claude --version` gives it."""
+    return subprocess.run(["claude", "--version"], capture_output=True, text=True).stdout.strip()
 
 
 def hand_over(path: Path, note: str = "") -> None:

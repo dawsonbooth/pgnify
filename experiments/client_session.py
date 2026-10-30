@@ -1,8 +1,9 @@
 """Open a real-client session for a person to run on their Claude subscription. pgnify is set up
 as a user would set it up: installed with `uv tool install`, its server registered with
 `claude mcp add` and its skill installed from the plugin marketplace. An interactive Claude Code
-gets the whole book and a request, as a user might write it, for one part of it, with the
-evaluation's output conventions.
+gets the whole book and a request, as a user might write it, for one part of it, or for the whole
+book when the slice names a source rather than a cut, with the evaluation's output conventions.
+Of Claude Code's own tools, the model has those that plan and delegate work, and no others.
 
 It checks that `pgnify` is installed as a command and the diagram reader's weights are in place,
 then prepares a run folder with an empty Claude Code configuration, registers the server and
@@ -10,14 +11,16 @@ installs the plugin there, puts the request on the clipboard and opens Claude Co
 working directory. The person logs in, pastes, sends and exits when the final answer is in.
 
 A watchdog guards the experiment, not pgnify, which sets no limits of its own: it ends a session
-that runs away or hangs, when its cost at list price passes a safety ceiling or when its log
-shows no activity for half an hour. It never ends a session for taking long while it works.
+that runs away or hangs, when its cost at list price, its subagents' and the advisor's included,
+passes a safety ceiling or when its logs show no activity for half an hour. It never ends a
+session for taking long while it works.
 
-Writes experiments/results/real-client/<slice>/<timestamp>/: request.md; command.json; work/,
-the server's output folder; claude-config/, whose session log is the transcript; and, when
-Claude Code exits, session.json and unwritten.pgn, the games the server saved that no PGN file
-was written from, if there are any, so that work a session left unfinished stays visible. Score
-it with experiments/score_slice.py SLICE FOLDER.
+Writes experiments/results/real-client/<slice>/<timestamp>/: request.md; command.json, with the
+version of Claude Code; work/, the server's output folder; claude-config/, whose session logs
+are the transcripts, the subagents' among them; and, when Claude Code exits, session.json and
+unwritten.pgn, the games the server saved that no PGN file was written from, if there are any,
+so that work a session left unfinished stays visible. Score a part with
+experiments/score_slice.py SLICE FOLDER, and a whole book with experiments/score_book.py.
 
     uv run python experiments/client_session.py SLICE
 """
@@ -47,31 +50,32 @@ MODEL = session.MODEL
 EFFORT = session.EFFORT
 MARKETPLACE = "dawsonbooth/pgnify"
 SKILL = "pgnify:pgnify-convert"
+# Claude Code's own tools that plan and delegate work, the only ones the model is given: none
+# reads or writes files, runs commands or reaches the network, so the book reaches the model
+# through pgnify alone. ToolSearch loads the tools Claude Code defers, pgnify's among them.
+TOOLS = ["Agent", "SendMessage", "TaskStop", "EnterPlanMode", "ExitPlanMode", "Skill", "ToolSearch"]
+# Of those, and of pgnify's, the ones allowed: everything else asks for approval, which
+# --permission-mode dontAsk refuses. ExitPlanMode, so that a plan made in plan mode can be left;
+# the skill by its plugin-qualified name and by its plain one, since Claude Code may check either.
+ALLOWED = ["mcp__pgnify", f"Skill({SKILL})", f"Skill({SKILL.split(':')[1]})", "ExitPlanMode"]
 # The watchdog's safety ceiling on the session's cost at its model's list price, unless its slice
 # sets client_ceiling_usd: a guard against runaway work, well above the cost expected, and no
 # target.
 CEILING_USD = 3.0
-# How long the session's log may show no activity before the watchdog ends the session, as hung
+# How long the session's logs may show no activity before the watchdog ends the session, as hung
 # or as left open after its final answer.
 IDLE_MINUTES = 30
-# The kinds of token the watchdog counts, each with its list price in dollars per million tokens;
-# cache writes at the one-hour rate, the higher.
-PRICE = score_slice.PRICES[MODEL]
-RATES = {
-    "input_tokens": PRICE.input,
-    "output_tokens": PRICE.output,
-    "cache_read_input_tokens": PRICE.cache_read,
-    "cache_creation_input_tokens": PRICE.cache_write_1h,
-}
 DIFFERENCES = [
     "pgnify installed with uv tool install and registered with claude mcp add, not run from the "
     "checkout with --strict-mcp-config",
     "the whole book as --books, not a clipped source",
     "the conversion instructions from the plugin's skill, which the model loads itself, not in "
-    "the prompt; the request names the part and the output conventions only",
-    "Claude Code's built-in tools listed, but refused by --permission-mode dontAsk; only "
-    f"pgnify's tools and the skill {SKILL} are allowed",
+    "the prompt; the request names the part, or the whole book, and the output conventions only",
+    f"Claude Code's tools that plan and delegate work, {', '.join(TOOLS)}, not --tools ''; "
+    f"allowed: {', '.join(ALLOWED)}; --permission-mode dontAsk refuses whatever else asks for "
+    "approval",
     "Claude Code's default compaction, not --autocompact 100k",
+    "the release of Claude Code installed, recorded, not a pinned one",
     "a watchdog, the experiment's guard against runaway or hung sessions, ends the session at "
     "a ceiling on its cost or after half an hour without activity, never for its time",
 ]
@@ -83,8 +87,10 @@ def main() -> None:
     slice_name = parser.parse_args().slice
     layout = session.slices()
     spec = layout["slices"][slice_name]
-    book = session.book(layout["cuts"][spec["cut"]]["source"])
-    part = spec.get("client_part", spec["part"])
+    # A slice of the whole book names its source; one of a part names the cut it is in.
+    whole = "cut" not in spec
+    book = session.book(spec["source"] if whole else layout["cuts"][spec["cut"]]["source"])
+    part = spec.get("client_part", spec.get("part"))
     ceiling = spec.get("client_ceiling_usd", CEILING_USD)
     # The library's file names are "Title - Author".
     title = book.stem.split(" - ")[0]
@@ -125,12 +131,10 @@ def main() -> None:
         if done.returncode != 0:
             sys.exit(f"{' '.join(step[:4])} failed: {done.stdout}{done.stderr}")
     command = ["claude", "--model", MODEL, "--effort", EFFORT, "--permission-mode", "dontAsk"]
-    # Allow the skill by its plugin-qualified name and by its plain one; Claude Code may check
-    # either.
-    command += ["--allowedTools", "mcp__pgnify", f"Skill({SKILL})", f"Skill({SKILL.split(':')[1]})"]
+    command += ["--tools", ",".join(TOOLS), "--allowedTools", *ALLOWED]
+    asked = f"Convert {title}" if whole else f"Convert part of {title}"
     request = (
-        f"Convert part of {title} into PGN, with pgnify: {part}.\n\n"
-        f"Output conventions: {layout['conventions']}\n"
+        f"{asked} into PGN, with pgnify: {part}.\n\nOutput conventions: {layout['conventions']}\n"
     )
     (folder / "request.md").write_text(request)
     (folder / "command.json").write_text(
@@ -157,7 +161,8 @@ def main() -> None:
     )
     session.hand_over(
         folder / "request.md",
-        f"pgnify was installed from commit {commit or 'unknown'}.\n"
+        f"{version}; pgnify was installed from commit {commit or 'unknown'}.\n"
+        "Exit only once the final answer is in and no subagent is still running.\n"
         f"The experiment's watchdog ends the session if its cost passes ${ceiling:.2f} at list "
         f"price,\nor after {IDLE_MINUTES} minutes without activity; never for taking long while "
         "it works.",
@@ -194,7 +199,8 @@ def main() -> None:
     print(f"\nSession closed{stopped_by}. Its folder: {folder}")
     if unwritten:
         print(f"{len(unwritten)} saved games were written to no PGN file: see unwritten.pgn.")
-    print(f"Score it: uv run python experiments/score_slice.py {slice_name} {folder}")
+    scorer = "score_book.py" if whole else "score_slice.py"
+    print(f"Score it: uv run python experiments/{scorer} {slice_name} {folder}")
 
 
 def _installed_commit() -> str | None:
@@ -252,11 +258,16 @@ def _last_activity(config_dir: Path, started: float) -> float:
 
 
 def _cost(config_dir: Path) -> float:
-    """The session's cost at list price, from its log: each request counted once, at the highest
-    count its entries record for each kind of token."""
-    requests: dict[str, tuple[int, ...]] = {}
+    """The session's cost at list price, from its logs, its subagents' included: each request
+    counted once, at the highest count its entries record, by its model's price, the advisor's
+    passes by the advisor's. A model without a price is priced as the dearest that has one, so
+    that the ceiling is never passed unseen."""
+    requests: dict[str, tuple[str, dict]] = {}
     for log in (config_dir / "projects").glob("**/*.jsonl"):
         for line in log.read_text(errors="replace").split("\n"):
+            # Only an assistant's entry, which holds its usage, is read.
+            if '"usage"' not in line:
+                continue
             try:
                 entry = json.loads(line)
             except json.JSONDecodeError:
@@ -265,12 +276,13 @@ def _cost(config_dir: Path) -> float:
             usage = message.get("usage")
             if entry.get("type") != "assistant" or not usage:
                 continue
-            tokens = tuple(usage.get(kind) or 0 for kind in RATES)
             key = message.get("id") or line
-            requests[key] = tuple(map(max, requests.get(key, (0,) * len(RATES)), tokens))
+            model, before = requests.get(key, (str(message.get("model")), {}))
+            requests[key] = (model, score_slice.larger_usage(before, usage))
+    dearest = max(score_slice.PRICES, key=lambda name: score_slice.PRICES[name].output)
     return sum(
-        sum(count * rate for count, rate in zip(tokens, RATES.values(), strict=True)) / 1e6
-        for tokens in requests.values()
+        score_slice.request_cost(model, usage) or score_slice.request_cost(dearest, usage) or 0.0
+        for model, usage in requests.values()
     )
 
 

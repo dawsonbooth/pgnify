@@ -24,7 +24,8 @@ output PGN alone, and list every fault, for review against the run's final answe
   heads and page numbers, are counted; those it lacks are listed as unsupported.
 - NAGs on the moves the run shares with the truth.
 - Running: from the session log, wall time, requests, tokens, thinking, compactions, cost at
-  list price, and the tool calls, build_pgn's by outcome; and the final answer.
+  list price, and the tool calls, build_pgn's by outcome, over the main conversation and its
+  subagents; each agent's share apart, and the advisor's; and the final answer.
 
 Writes score.json and faults.md into each run's folder and prints a summary.
 
@@ -70,10 +71,23 @@ class Price(NamedTuple):
     cache_write_1h: float
 
 
+# As Claude Code's model catalog gives them (2.1.314), which its own cost accounting uses: the
+# sessions' model, and those a subagent or the advisor may run on.
 PRICES = {
-    "claude-sonnet-5-5": Price(2.0, 10.0, 0.20, 2.50, 4.0),
+    "claude-sonnet-5-5": Price(2.0, 10.0, 0.10, 2.50, 4.0),
+    "claude-opus-5-5": Price(4.0, 20.0, 0.20, 5.0, 8.0),
     "claude-haiku-5-5": Price(0.10, 0.50, 0.01, 0.125, 0.20),
+    "claude-fable-5-1": Price(10.0, 50.0, 0.25, 12.5, 20.0),
 }
+# The token counts an agent's requests are totalled in.
+TOKENS = (
+    "input_tokens",
+    "cache_read_tokens",
+    "cache_write_tokens",
+    "cache_write_1h_tokens",
+    "output_tokens",
+    "thinking_tokens",
+)
 
 
 def main() -> None:
@@ -105,9 +119,18 @@ def score_run(
     lines = [f"# Faults: {run.relative_to(ROOT) if run.is_relative_to(ROOT) else run}", ""]
     lines += faults
     lines += ["", "## Running", ""]
-    lines += [f"- {key}: {value}" for key, value in running.items()]
+    lines += running_lines(running)
     lines += ["", "## Final answer", "", answer or "(none)", ""]
     return score, "\n".join(lines)
+
+
+def running_lines(running: dict[str, Any]) -> list[str]:
+    """_session's account as list items, each agent's on a line of its own."""
+    lines = [f"- {key}: {value}" for key, value in running.items() if key != "agents"]
+    for agent in running.get("agents", []):
+        shown = {key: value for key, value in agent.items() if key not in ("agent", "report")}
+        lines.append(f"- agent {agent['agent']}: {shown}")
+    return lines
 
 
 def score_output(
@@ -623,55 +646,145 @@ def _side(game: chess.pgn.Game) -> str:
 
 
 def _session(run: Path) -> dict[str, Any]:
-    """What the session log says of a run: wall time, requests and tokens of its model,
-    thinking, compactions, cost at list price, tool calls, build_pgn's outcomes, the final
-    answer."""
-    logs = [
-        path
-        for path in sorted((run / "claude-config" / "projects").glob("**/*.jsonl"))
-        if "subagents" not in path.parts
-    ]
+    """What the session log says of a run, over its main conversation and its subagents: wall
+    time, requests, tokens, thinking, compactions, cost at list price, the advisor's share of
+    the cost, tool calls, build_pgn's outcomes, and API requests retried or failed; each agent's
+    own account; and the final answer."""
     command = json.loads((run / "command.json").read_text())
-    model = command.get("model")
+    accounts = agents(run)
+    if not any(account["requests"] for account in accounts):
+        raise ValueError(f"no model's message in {run}'s session log")
+    main = accounts[0]
+    totals: Counter[str] = Counter()
+    tools: Counter[str] = Counter()
+    builds: Counter[str] = Counter()
+    cost: float | None = 0.0
+    advisor_cost: float | None = 0.0
+    for account in accounts:
+        for kind in (*TOKENS, "requests", "compactions", "api_retries", "api_errors"):
+            totals[kind] += account[kind]
+        totals["tool_errors"] += account["tool_errors"]
+        tools.update(account["tool_calls"])
+        builds.update(account["build_pgn"])
+        advice: dict[str, Any] = account.get("advisor") or {"calls": 0, "cost_list_usd": 0.0}
+        totals["advisor_calls"] += int(advice["calls"])
+        advisor_cost = _added(advisor_cost, advice["cost_list_usd"])
+        cost = _added(cost, account["cost_list_usd"])
+    cost = _added(cost, advisor_cost)
+    ended = max((account["ended"] for account in accounts if account["ended"]), default=None)
+    return {
+        "model": command.get("model"),
+        "claude_version": command.get("claude_version"),
+        "wall_seconds": _seconds(main["started"], ended),
+        "requests": totals["requests"],
+        **{kind: totals[kind] for kind in TOKENS},
+        "compactions": totals["compactions"],
+        "cost_list_usd": round(cost, 4) if cost is not None else None,
+        "client_cost_usd": main["client_cost_usd"],
+        "advisor_calls": totals["advisor_calls"],
+        "advisor_cost_list_usd": round(advisor_cost, 4) if advisor_cost is not None else None,
+        "subagents": len(accounts) - 1,
+        "tool_calls": dict(tools),
+        "build_pgn": dict(builds),
+        "tool_errors": totals["tool_errors"],
+        "api_retries": totals["api_retries"],
+        "api_errors": totals["api_errors"],
+        "agents": [
+            {key: value for key, value in account.items() if key != "contexts"}
+            for account in accounts
+        ],
+        "final_answer": main["report"],
+    }
+
+
+def agents(run: Path) -> list[dict[str, Any]]:
+    """Each agent of a run's session, from its log: the main conversation, from the prompt or
+    request sent, then each subagent, by when it started, with its type and task as Claude Code
+    recorded them. For each: its models, requests, tokens, cost at list price, the advisor's
+    calls, advice, tokens and cost apart, tool calls, build_pgn's outcomes, the context of each
+    request, compactions, API requests retried or failed, when it started and ended, and its
+    last text."""
+    projects = run / "claude-config" / "projects"
     # The prompt or request, pasted or passed: the session starts when it is sent, not with a
     # command such as /login typed before it.
     sent = next((run / name for name in ("prompt.md", "request.md") if (run / name).exists()), None)
     first_line = sent.read_text().strip().split("\n")[0] if sent else ""
-    entries = []
-    for log in logs:
-        # Lines end only at "\n": the log keeps other line separators as they are, inside its
-        # JSON.
-        for line in log.read_text().split("\n"):
-            try:
-                entries.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-    usage: dict[str, dict[str, Any]] = {}
+    logs = sorted(projects.glob("**/*.jsonl"))
+    sub = [log for log in logs if "subagents" in log.relative_to(projects).parts]
+    # The main conversation's logs first, so that the messages a fork's log repeats from it,
+    # such as the one that started the fork, count as the main conversation's.
+    counted: set[str] = set()
+    mains = []
+    for log in (log for log in logs if log not in sub):
+        account = _agent(log, first_line, counted)
+        account["agent"] = "main" if not mains else f"main {len(mains) + 1}"
+        mains.append(account)
+    subagents = []
+    for log in sub:
+        account = _agent(log, "", counted)
+        meta = _meta(log)
+        account["agent"] = log.stem.removeprefix("agent-")
+        account["type"] = meta.get("agentType")
+        account["task"] = meta.get("description")
+        subagents.append(account)
+    subagents.sort(key=lambda account: account["started"] or "")
+    return [*mains, *subagents]
+
+
+def _meta(log: Path) -> dict[str, Any]:
+    """What Claude Code recorded of a subagent beside its log, if anything."""
+    path = log.with_suffix(".meta.json")
+    try:
+        return json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _agent(log: Path, first_line: str, counted: set[str]) -> dict[str, Any]:
+    """One agent's account of its log, as agents gives it; a request already counted, by its
+    message's id, is not counted again."""
+    usages: dict[str, tuple[str, dict[str, Any]]] = {}
     calls: dict[str, dict[str, Any]] = {}
-    seen: set[str] = set()
-    started = ended = None
     texts: list[tuple[str, str]] = []
-    compactions = 0
-    for entry in entries:
+    advice: list[str] = []
+    advisor_calls = compactions = api_retries = api_errors = 0
+    started = ended = client = None
+    # Lines end only at "\n": the log keeps other line separators as they are, inside its JSON.
+    for line in log.read_text(errors="replace").split("\n"):
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
         kind = entry.get("type")
         stamp = entry.get("timestamp")
-        if kind == "system" and entry.get("subtype") == "compact_boundary":
-            compactions += 1
+        if kind == "cost-state":
+            client = entry
+        if kind == "system":
+            compactions += entry.get("subtype") == "compact_boundary"
+            # A request that failed and that Claude Code retried.
+            api_retries += entry.get("subtype") == "api_error"
         message = entry.get("message") if isinstance(entry.get("message"), dict) else None
+        if not message:
+            continue
         if (
             kind == "user"
-            and message
-            and isinstance(message.get("content"), str)
             and started is None
             and not entry.get("isMeta")
-            and (not first_line or first_line in message["content"])
+            and (not first_line or first_line in _text(message.get("content")))
         ):
             started = stamp
-        if kind == "assistant" and message:
-            seen.add(str(message.get("model")))
-            if model and not str(message.get("model", "")).startswith(model):
+        if kind == "assistant":
+            key = message.get("id") or line
+            if key in counted and key not in usages:
                 continue
-            usage[message.get("id")] = message.get("usage") or {}
+            # Claude Code's own messages, such as an API error's, are no request of a model.
+            if message.get("model") == "<synthetic>":
+                api_errors += bool(entry.get("isApiErrorMessage"))
+            else:
+                counted.add(key)
+                usage = message.get("usage") or {}
+                model, before = usages.get(key, (str(message.get("model")), {}))
+                usages[key] = (model, larger_usage(before, usage))
             ended = stamp
             for block in message.get("content") or []:
                 if block.get("type") == "tool_use" and block["id"] not in calls:
@@ -679,69 +792,160 @@ def _session(run: Path) -> dict[str, Any]:
                         "name": block["name"].removeprefix(TOOL_PREFIX),
                         "input": block["input"],
                     }
-                if block.get("type") == "text" and block.get("text", "").strip():
-                    texts.append((message.get("id"), block["text"]))
-        if kind == "user" and message and isinstance(message.get("content"), list):
+                elif block.get("type") == "server_tool_use" and block.get("name") == "advisor":
+                    advisor_calls += 1
+                elif block.get("type") == "advisor_tool_result":
+                    advice.append(_text(block.get("content")))
+                elif block.get("type") == "text" and block.get("text", "").strip():
+                    texts.append((key, block["text"]))
+        if kind == "user" and isinstance(message.get("content"), list):
             for block in message["content"]:
                 if block.get("type") == "tool_result" and block.get("tool_use_id") in calls:
-                    content = block.get("content")
-                    calls[block["tool_use_id"]]["result"] = (
-                        content
-                        if isinstance(content, str)
-                        else " ".join(
-                            part.get("text", "") for part in content or [] if isinstance(part, dict)
-                        )
-                    )
+                    calls[block["tool_use_id"]]["result"] = _text(block.get("content"))
                     calls[block["tool_use_id"]]["is_error"] = bool(block.get("is_error"))
     # A call Claude Code refused for its name, such as a pgnify tool's without its prefix.
     for call in calls.values():
         if "No such tool available" in call.get("result", ""):
             call["name"] += ", no such tool"
-    if model and seen and not usage:
-        raise ValueError(f"no message of {model} in {run}'s session log, only of {sorted(seen)}")
-    totals = Counter()
-    for request in usage.values():
-        totals["input_tokens"] += request.get("input_tokens", 0)
-        totals["cache_read_tokens"] += request.get("cache_read_input_tokens", 0)
-        totals["cache_write_tokens"] += request.get("cache_creation_input_tokens", 0)
-        split = request.get("cache_creation") or {}
-        totals["cache_write_1h_tokens"] += split.get("ephemeral_1h_input_tokens", 0)
-        totals["output_tokens"] += request.get("output_tokens", 0)
-        totals["thinking_tokens"] += (request.get("output_tokens_details") or {}).get(
-            "thinking_tokens", 0
-        )
-    price = PRICES.get(model or "")
-    cost = None
-    if price:
-        five = totals["cache_write_tokens"] - totals["cache_write_1h_tokens"]
-        cost = round(
-            (
-                totals["input_tokens"] * price.input
-                + totals["output_tokens"] * price.output
-                + totals["cache_read_tokens"] * price.cache_read
-                + five * price.cache_write_5m
-                + totals["cache_write_1h_tokens"] * price.cache_write_1h
+    totals: Counter[str] = Counter()
+    advised: Counter[str] = Counter()
+    advisor_models: set[str] = set()
+    cost: float | None = 0.0
+    advisor_cost: float | None = 0.0
+    contexts = []
+    for model, usage in usages.values():
+        for kind, count in _tokens(usage).items():
+            totals[kind] += count
+        cost = _added(cost, usage_cost(model, usage))
+        contexts.append(_context(usage))
+        for advice_pass in advisor_passes(usage):
+            advisor_models.add(str(advice_pass.get("model")))
+            advised.update(_tokens(advice_pass))
+            advisor_cost = _added(
+                advisor_cost, usage_cost(str(advice_pass.get("model")), advice_pass)
             )
-            / 1e6,
-            4,
-        )
-    tools = Counter(call["name"] for call in calls.values())
-    builds = Counter(_build_outcome(call) for call in calls.values() if call["name"] == "build_pgn")
-    # The final answer: the text of the model's last message that has any, all its blocks.
-    final = "\n\n".join(text for id_, text in texts if id_ == texts[-1][0]) if texts else None
-    return {
-        "model": model,
-        "claude_version": command.get("claude_version"),
-        "wall_seconds": _seconds(started, ended),
-        "requests": len(usage),
-        **dict(totals),
+    # The last text: the text of the agent's last message that has any, all its blocks.
+    report = "\n\n".join(text for id_, text in texts if id_ == texts[-1][0]) if texts else None
+    account: dict[str, Any] = {
+        "agent": None,
+        "type": None,
+        "task": None,
+        "models": sorted({model for model, _ in usages.values()}),
+        "started": started,
+        "ended": ended,
+        "seconds": _seconds(started, ended),
+        "requests": len(usages),
+        **{kind: totals[kind] for kind in TOKENS},
+        "cost_list_usd": round(cost, 4) if cost is not None else None,
+        "peak_context": max(contexts, default=0),
+        "contexts": contexts,
         "compactions": compactions,
-        "cost_list_usd": cost,
-        "tool_calls": dict(tools),
-        "build_pgn": dict(builds),
+        "api_retries": api_retries,
+        "api_errors": api_errors,
+        "tool_calls": dict(Counter(call["name"] for call in calls.values())),
+        "build_pgn": dict(
+            Counter(_build_outcome(call) for call in calls.values() if call["name"] == "build_pgn")
+        ),
         "tool_errors": sum(call.get("is_error", False) for call in calls.values()),
-        "final_answer": final,
+        # Claude Code's own account of the session's cost, by its prices, for comparison.
+        "client_cost_usd": client.get("totalCostUSD") if client else None,
+        "report": report,
     }
+    if advisor_calls or advised:
+        account["advisor"] = {
+            "calls": advisor_calls,
+            "models": sorted(advisor_models),
+            **{kind: advised[kind] for kind in TOKENS},
+            "cost_list_usd": round(advisor_cost, 4) if advisor_cost is not None else None,
+            "advice": advice,
+        }
+    return account
+
+
+def request_cost(model: str, usage: dict[str, Any]) -> float | None:
+    """A request's whole cost at list price, in dollars: its model's tokens and the advisor's
+    passes, each at its own model's price; None if one of them has no price."""
+    cost = usage_cost(model, usage)
+    for advice_pass in advisor_passes(usage):
+        cost = _added(cost, usage_cost(str(advice_pass.get("model")), advice_pass))
+    return cost
+
+
+def advisor_passes(usage: dict[str, Any]) -> list[dict[str, Any]]:
+    """The advisor's passes in a request, which its usage lists apart from its model's, each
+    with the advisor's model and tokens."""
+    return [
+        iteration
+        for iteration in usage.get("iterations") or []
+        if isinstance(iteration, dict) and iteration.get("type") == "advisor_message"
+    ]
+
+
+def _added(total: float | None, cost: float | None) -> float | None:
+    """A sum of costs, None once one of them is."""
+    return total + cost if total is not None and cost is not None else None
+
+
+def usage_cost(model: str, usage: dict[str, Any]) -> float | None:
+    """The cost at list price, in dollars, of one request's tokens as its usage gives them, by
+    the model's price: cache writes at the five-minute or one-hour rate as the usage splits them,
+    else at the one-hour rate, the higher; None for a model without a price."""
+    price = next((listed for name, listed in PRICES.items() if model.startswith(name)), None)
+    if price is None:
+        return None
+    tokens = _tokens(usage)
+    split = usage.get("cache_creation")
+    one_hour = tokens["cache_write_1h_tokens"] if split else tokens["cache_write_tokens"]
+    return (
+        tokens["input_tokens"] * price.input
+        + tokens["output_tokens"] * price.output
+        + tokens["cache_read_tokens"] * price.cache_read
+        + (tokens["cache_write_tokens"] - one_hour) * price.cache_write_5m
+        + one_hour * price.cache_write_1h
+    ) / 1e6
+
+
+def _tokens(usage: dict[str, Any]) -> dict[str, int]:
+    """A request's token counts, as TOKENS names them."""
+    split = usage.get("cache_creation") or {}
+    return {
+        "input_tokens": usage.get("input_tokens") or 0,
+        "cache_read_tokens": usage.get("cache_read_input_tokens") or 0,
+        "cache_write_tokens": usage.get("cache_creation_input_tokens") or 0,
+        "cache_write_1h_tokens": split.get("ephemeral_1h_input_tokens") or 0,
+        "output_tokens": usage.get("output_tokens") or 0,
+        "thinking_tokens": (usage.get("output_tokens_details") or {}).get("thinking_tokens") or 0,
+    }
+
+
+def larger_usage(before: dict[str, Any], usage: dict[str, Any]) -> dict[str, Any]:
+    """Of two entries' usage for one request, which the log may record in parts, the one with
+    more tokens, so that a request counts at its highest."""
+    return usage if sum(_tokens(usage).values()) >= sum(_tokens(before).values()) else before
+
+
+def _context(usage: dict[str, Any]) -> int:
+    """The tokens of context a request sent: of its model's last pass, when the advisor or a
+    compaction made several."""
+    passes = [
+        iteration
+        for iteration in usage.get("iterations") or []
+        if isinstance(iteration, dict) and iteration.get("type") == "message"
+    ]
+    last = passes[-1] if passes else usage
+    tokens = _tokens(last)
+    return tokens["input_tokens"] + tokens["cache_read_tokens"] + tokens["cache_write_tokens"]
+
+
+def _text(content: Any) -> str:
+    """The text of a message's or a block's content: a string, or the texts of its parts."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, dict):
+        return _text(content.get("text") or content.get("content"))
+    if isinstance(content, list):
+        return " ".join(_text(part) for part in content)
+    return ""
 
 
 def _build_outcome(call: dict[str, Any]) -> str:

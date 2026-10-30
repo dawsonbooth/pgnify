@@ -1,8 +1,10 @@
 # The evaluation's slices, each run on a clipped source: pages of a book in the local manifest,
 # data/local/manifest.toml (its shape: data/local/manifest.example.toml), cut by
 # experiments/cut.py into data/local/cuts/. Each slice has a truth, a reference PGN built and
-# checked by hand. Cuts and truths hold the books' words, so both stay local, under data/local/,
-# which is not tracked.
+# checked by hand. A slice that names a source instead of a cut is a whole book, which only a
+# real-client session converts (experiments/client_session.py), and it has an inventory instead
+# of a truth (experiments/score_book.py). Cuts, truths and inventories hold the books' words, so
+# they stay local, under data/local/, which is not tracked.
 
 # The output conventions every session asks for, as a user might; pgnify's instructions leave
 # conventions to the user.
@@ -66,6 +68,15 @@ truth = "data/local/truth/wct-skewer.pgn"
 cut = "logical-chess-12"
 part = "Game 12, Pitschak – Flohr, Liebwerda 1934, with all its notes"
 truth = "data/local/truth/logical-chess-12.pgn"
+
+# The whole of Winning Chess Strategies, the first book converted whole: its 148 diagrams, 26
+# tests and their solutions, its games and its commentary. Its real-client session has a higher
+# safety ceiling on cost: a guard against runaway work, not a target.
+[slices.winning-chess-strategies]
+source = "winning-chess-strategies"
+client_part = "the whole book, with every game, position, test and solution, the variations it gives and its commentary word for word"
+inventory = "data/local/inventory/winning-chess-strategies.json"
+client_ceiling_usd = 50.0
 
 # A smoke test of one exercise, to check the session launcher, the clipped source and the tools.
 # Scored against the rook forks' truth, of which it should find one game.
