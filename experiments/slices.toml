@@ -42,14 +42,14 @@ client_part = "the rook forks in Chapter 5, Forks, with their examples, their ex
 truth = "data/local/truth/workbook-rook-forks.pgn"
 
 # The whole of Chapter 5, for scale: its six basic examples and Exercises 115 to 156, with
-# their solutions. The real-client session gets longer limits than the launcher's.
+# their solutions. Its real-client session has a higher safety ceiling on cost than the
+# launcher's: a guard against runaway work, not a target.
 [slices.workbook-forks]
 cut = "workbook-forks"
 part = "Chapter 5, Forks, with its examples and the solutions to its exercises"
 client_part = "Chapter 5, Forks, with its examples, its exercises and the solutions to those exercises"
 truth = "data/local/truth/workbook-forks.pgn"
-client_budget_usd = 10.0
-client_minutes = 90
+client_ceiling_usd = 10.0
 
 [slices.logical-chess-14]
 cut = "logical-chess-14"
