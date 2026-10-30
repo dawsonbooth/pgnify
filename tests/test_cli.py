@@ -2,6 +2,7 @@ from importlib.metadata import version
 from pathlib import Path
 
 import pytest
+from support import ONE_GAME, call_tools, move_specs
 from typer.testing import CliRunner
 
 from pgnify import instructions
@@ -50,6 +51,26 @@ def test_report_writes_report_md_and_json_and_prints_a_line_per_pgn_file(tmp_pat
     assert result.exit_code == 0
     assert (tmp_path / "report.md").is_file() and (tmp_path / "report.json").is_file()
     assert "games.pgn: 1 game, 0 verified problems, 0 possible issues" in result.output
+
+
+def test_report_prints_a_line_for_each_book_with_the_logs_possible_issues(
+    primer: Path, tmp_path: Path
+) -> None:
+    # 1.e5 is not legal, so g is never saved: a possible issue of the book's, from the log.
+    call_tools(
+        primer,
+        tmp_path,
+        [
+            ("build_pgn", {"spec": {"moves": move_specs("e5")}, "name": "g"}),
+            ("write_pgn", {"games": [ONE_GAME], "file": "one"}),
+        ],
+    )
+    result = RUNNER.invoke(app, ["report", str(tmp_path)])
+    assert "one.pgn: 1 game, 0 verified problems, 0 possible issues" in result.output
+    assert (
+        "pocket-primer.epub: 1 possible issue in the server's log, across 1 PGN file"
+        in result.output
+    )
 
 
 @pytest.mark.parametrize(("command", "missing"), [("check", "game.pgn"), ("report", "out")])

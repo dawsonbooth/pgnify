@@ -95,8 +95,9 @@ def check_file(pgn: Path, book: Path | None = None) -> dict[str, Any]:
 
 
 def report(folder: Path, images: bool = False) -> dict[str, Any]:
-    """Report on an output folder of `pgnify serve`: check each PGN file against its book and
-    the server's log, and quote the model's account separately. Writes report.md and
+    """Report on an output folder of `pgnify serve`: check each PGN file against its book, then,
+    for each book, what the server's log shows across every session and every PGN file written
+    from it in the folder, and quote the model's account separately. Writes report.md and
     report.json into the folder, and with images saves each doubtful game's diagram beside a
     drawing of its position in report-images/."""
     folder = folder.resolve()
@@ -104,8 +105,10 @@ def report(folder: Path, images: bool = False) -> dict[str, Any]:
     records = read_records(work)
     log = _log(work / "log.jsonl")
     prose_of: dict[Path, str] = {}
-    keys = set()
     outputs = []
+    # By book key: the book's name, and the PGN files written from it with their games.
+    names: dict[str, str] = {}
+    written: dict[str, list[tuple[str, Sequence[chess.pgn.Game], list[dict[str, Any]]]]] = {}
     for pgn in sorted(path for path in folder.iterdir() if path.suffix.lower() == ".pgn"):
         record = records.get(pgn.name) or next(
             (kept for name, kept in records.items() if name.casefold() == pgn.name.casefold()), {}
@@ -117,30 +120,45 @@ def report(folder: Path, images: bool = False) -> dict[str, Any]:
         text = pgn.read_text(encoding="utf-8", errors="replace")
         result = check(text, prose_of[book] if book else None)
         key = record.get("book_key")
-        keys.add(key)
         entries = [entry for entry in log if _of_book(entry, key)] if key else []
-        issues = _log_issues(entries, result["games"], _positions(read_games(text)))
-        result["findings"] += [asdict(finding) for finding in issues]
+        result["findings"] += [asdict(f) for f in _doubtful_starts(entries, result["games"])]
+        if key:
+            names[key] = record.get("book") or key
+            written.setdefault(key, []).append((pgn.name, read_games(text), result["games"]))
         outputs.append(
             {
                 "file": pgn.name,
                 "book": record.get("book"),
                 "book_found": book is not None,
                 **result,
-                "read": _read_summary(entries),
                 "images": _images(folder, pgn, entries, result["games"]) if images else [],
                 "model_account": read_notes(pgn),
             }
         )
+    books = []
+    for key, files in written.items():
+        entries = [entry for entry in log if _of_book(entry, key)]
+        games = [game for _, read, _ in files for game in read]
+        summaries = [summary for _, _, counted in files for summary in counted]
+        books.append(
+            {
+                "book": names[key],
+                "files": [name for name, _, _ in files],
+                "read": _read_summary(entries),
+                "findings": [
+                    asdict(finding)
+                    for finding in _log_issues(entries, summaries, _positions(games))
+                ],
+            }
+        )
     elsewhere = [
-        entry
-        for entry in log
-        if "error" in entry and not any(_of_book(entry, key) for key in keys if key)
+        entry for entry in log if "error" in entry and not any(_of_book(entry, k) for k in written)
     ]
     reported = {
         "folder": str(folder),
         "caveat": CAVEAT,
         "outputs": outputs,
+        "books": books,
         "findings": [asdict(finding) for finding in _errors(elsewhere)],
     }
     text = json.dumps(reported, indent=1, ensure_ascii=False) + "\n"
@@ -157,7 +175,11 @@ def markdown(reported: dict[str, Any]) -> str:
         lines += [f"## {_inline(output['file'])}", ""]
         if output["book"]:
             moved = "" if output["book_found"] else ", which is no longer where it was"
-            lines += [f"From the book {_inline(output['book'])}{moved}.", ""]
+            lines += [
+                f"From the book {_inline(output['book'])}{moved}. What the server's log shows "
+                "for the book is under its own heading.",
+                "",
+            ]
         lines += ["| Game | Label | Start | Plies | Variations | Comments | Uncertain |"]
         lines += ["|---|---|---|---|---|---|---|"]
         for game in output["games"]:
@@ -175,10 +197,6 @@ def markdown(reported: dict[str, Any]) -> str:
             lines += [f"### {heading}", ""]
             lines += [_line(finding) for finding in found] or ["None found."]
             lines.append("")
-        if output["read"]:
-            lines += ["### What the server's log shows", ""]
-            lines += [f"- {name}: {_inline(value)}" for name, value in output["read"].items()]
-            lines.append("")
         if output["images"]:
             lines += ["### Diagrams beside their positions", ""]
             lines += ["| Game | The book's diagram | The game's position |", "|---|---|---|"]
@@ -194,6 +212,23 @@ def markdown(reported: dict[str, Any]) -> str:
                 "The model gave no notes. That says nothing either way about whether the "
                 "conversion is complete."
             )
+        lines.append("")
+    for book in reported["books"]:
+        files = ", ".join(_inline(name) for name in book["files"])
+        lines += [
+            f"## {_inline(book['book'])}: what the server's log shows",
+            "",
+            "From every session's calls on this book in this folder. The diagrams read from it "
+            f"are matched against the games of all its PGN files here, {files}: a diagram that "
+            "a game reaches shows that one of these files has its position, not that any one "
+            "conversion is complete.",
+            "",
+        ]
+        lines += [f"- {name}: {_inline(value)}" for name, value in book["read"].items()] or [
+            "The server's log holds no call on this book."
+        ]
+        lines += ["", "### Possible issues in the log, for a person to judge", ""]
+        lines += [_line(finding) for finding in book["findings"]] or ["None found."]
         lines.append("")
     if reported["findings"]:
         lines += ["## Tool errors outside these PGN files", ""]
@@ -325,13 +360,27 @@ def _log(path: Path) -> list[dict[str, Any]]:
     return entries
 
 
+def _doubtful_starts(entries: list[dict[str, Any]], games: list[dict[str, Any]]) -> list[Finding]:
+    """The diagrams read from the book with doubts or problems that one of games, one PGN
+    file's, starts from, each given with its game."""
+    findings = []
+    for entry in _readings(entries):
+        result = entry["result"]
+        said = _said(result) if result["ok"] else ""
+        if said and (game := _starting_from(result, games)):
+            where = _picture(entry["arguments"]["image_path"])
+            findings.append(Finding("issue", f"{where} was read with {said}", game))
+    return findings
+
+
 def _log_issues(
     entries: list[dict[str, Any]], games: list[dict[str, Any]], positions: set[str]
 ) -> list[Finding]:
-    """What the server's log shows a person should look at. positions are the placements every
-    game starts from or reaches, in its moves or its variations."""
+    """What the server's log shows a person should look at, for one book. games are the games
+    of every PGN file written from it, and positions the placements they start from or reach,
+    in their moves or their variations."""
     findings = []
-    readings = [entry for entry in entries if entry["tool"] == "read_diagram" and "result" in entry]
+    readings = _readings(entries)
     read = {_picture(entry["arguments"]["image_path"]) for entry in readings}
     for entry in readings:
         result, where = entry["result"], _picture(entry["arguments"]["image_path"])
@@ -340,23 +389,22 @@ def _log_issues(
                 Finding("issue", f"the diagram reader read no board in {where}: {result['reason']}")
             )
             continue
-        said = []
-        if result["doubts"]:
-            said.append("doubts on " + ", ".join(_doubt(doubt) for doubt in result["doubts"]))
-        if result["problems"]:
-            said.append("problems: " + ", ".join(result["problems"]))
-        if said:
-            game = _starting_from(result, games)
-            unused = "" if game else "; no game starts from its reading"
-            findings.append(
-                Finding("issue", f"{where} was read with {'; '.join(said)}{unused}", game)
-            )
+        if said := _said(result):
+            if _starting_from(result, games) is None:
+                findings.append(
+                    Finding(
+                        "issue",
+                        f"{where} was read with {said}; no game in this book's PGN files starts "
+                        "from its reading",
+                    )
+                )
         elif result["placement"] not in positions:
             findings.append(
                 Finding(
                     "issue",
-                    f"{where} was read as {result['placement']}, a placement no game starts from "
-                    "or reaches: a game may be missing, or the game corrects the reading",
+                    f"{where} was read as {result['placement']}, a placement no game in this "
+                    "book's PGN files starts from or reaches: a game may be missing, or a game "
+                    "corrects the reading",
                 )
             )
     for entry in entries:
@@ -394,6 +442,21 @@ def _log_issues(
                 )
             )
     return findings + _errors(entries)
+
+
+def _readings(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The log's entries of diagrams the reader answered for, a board or a reason why none."""
+    return [entry for entry in entries if entry["tool"] == "read_diagram" and "result" in entry]
+
+
+def _said(result: dict[str, Any]) -> str:
+    """A reading's doubts and problems, in words, or "" when it has neither."""
+    said = []
+    if result["doubts"]:
+        said.append("doubts on " + ", ".join(_doubt(doubt) for doubt in result["doubts"]))
+    if result["problems"]:
+        said.append("problems: " + ", ".join(result["problems"]))
+    return "; ".join(said)
 
 
 def _errors(entries: list[dict[str, Any]]) -> list[Finding]:

@@ -11,6 +11,8 @@ FROM_THE_BOOK = "The king enters the square of the h-pawn just in time and the g
 NOT_IN_IT = "White should resign at once because the pawn cannot be stopped by anything."
 # White's king on g1 and rook on a1, Black's king on g8.
 ROOK_ON_A1 = "6k1/8/8/8/8/8/8/R5K1"
+# White's king on g1 and knight on b1, Black's king on g8.
+KNIGHT_ON_B1 = "6k1/8/8/8/8/8/8/1N4K1"
 
 
 def test_a_sound_game_has_no_finding() -> None:
@@ -83,10 +85,11 @@ def test_report_md_gives_the_caveat_and_the_checks_before_the_models_account(
             ("write_pgn", {"games": [ONE_GAME], "notes": "Everything is here."}),
         ],
     )
-    (output,) = report(tmp_path)["outputs"]
+    reported = report(tmp_path)
+    (output,) = reported["outputs"]
     assert output["book"] == "pocket-primer.epub"
     assert output["model_account"] == "Everything is here."
-    assert output["read"]["pages read"] == "9"
+    assert reported["books"][0]["read"]["pages read"] == "9"
     page = (tmp_path / "report.md").read_text()
     assert page.index(CAVEAT) < page.index("### Verified problems")
     assert page.index("### Possible issues") < page.index("### The model's own account")
@@ -114,8 +117,8 @@ def test_text_a_pgn_holds_cannot_add_sections_to_the_report(primer: Path, tmp_pa
     )
     report(tmp_path)
     lines = (tmp_path / "report.md").read_text().splitlines()
-    assert sum(line.startswith("### Possible issues") for line in lines) == 1
-    assert sum(line.startswith("### The model's own account") for line in lines) == 1
+    assert lines.count("### Possible issues, for a person to judge") == 1
+    assert lines.count("### The model's own account, not verified") == 1
     assert not any(line.startswith("> pgnify verified") for line in lines)
 
 
@@ -155,8 +158,8 @@ def test_a_game_built_but_never_saved_is_a_possible_issue(primer: Path, tmp_path
             ("write_pgn", {"games": [ONE_GAME]}),
         ],
     )
-    (output,) = report(tmp_path)["outputs"]
-    issues = [f["what"] for f in output["findings"] if f["kind"] == "issue"]
+    (book,) = report(tmp_path)["books"]
+    issues = [f["what"] for f in book["findings"] if f["kind"] == "issue"]
     assert any("'g' and never saved" in what for what in issues)
 
 
@@ -186,8 +189,8 @@ def test_a_log_line_holding_a_line_separator_is_still_read(primer: Path, tmp_pat
     }
     with log.open("a") as file:
         file.write(json.dumps(error, ensure_ascii=False) + "\n")
-    (output,) = report(tmp_path)["outputs"]
-    assert output["read"]["tool calls"] == 2
+    (book,) = report(tmp_path)["books"]
+    assert book["read"]["tool calls"] == 2
 
 
 def test_a_tool_error_outside_every_pgn_file_is_reported(primer: Path, tmp_path: Path) -> None:
@@ -207,8 +210,8 @@ def test_a_picture_extracted_but_never_read_is_a_possible_issue(
         tmp_path,
         [("doc_images", {"page": EXERCISES_PAGE}), ("write_pgn", {"games": [ONE_GAME]})],
     )
-    (output,) = report(tmp_path)["outputs"]
-    unread = [f for f in output["findings"] if "extracted but never read" in f["what"]]
+    (book,) = report(tmp_path)["books"]
+    unread = [f for f in book["findings"] if "extracted but never read" in f["what"]]
     assert [f["kind"] for f in unread] == ["issue", "issue"]
 
 
@@ -243,10 +246,10 @@ def _reading(placement: str) -> dict[str, Any]:
 def test_a_picture_whose_reading_failed_counts_as_never_read(primer: Path, tmp_path: Path) -> None:
     log, picture = _extract_pictures(primer, tmp_path, [("write_pgn", {"games": [ONE_GAME]})])
     _log_reading(log, picture, {"error": "RuntimeError: the diagram reader is not installed"})
-    (output,) = report(tmp_path)["outputs"]
+    (book,) = report(tmp_path)["books"]
     name = Path(picture).name
-    assert any(name in f["what"] and "never read" in f["what"] for f in output["findings"])
-    assert output["read"]["diagrams read"] == 0
+    assert any(name in f["what"] and "never read" in f["what"] for f in book["findings"])
+    assert book["read"]["diagrams read"] == 0
 
 
 def test_a_report_shows_a_doubtful_diagram_beside_its_position(
@@ -300,10 +303,8 @@ def test_a_diagram_read_whose_position_no_game_reaches_is_a_possible_issue(
     reached = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR"  # after 1.e4
     _log_reading(log, picture, {"result": _reading(reached)})
     _log_reading(log, picture, {"result": _reading(ROOK_ON_A1)})
-    (output,) = report(tmp_path)["outputs"]
-    unreached = [
-        f["what"] for f in output["findings"] if "no game starts from or reaches" in f["what"]
-    ]
+    (book,) = report(tmp_path)["books"]
+    unreached = [f["what"] for f in book["findings"] if "starts from or reaches" in f["what"]]
     assert len(unreached) == 1 and ROOK_ON_A1 in unreached[0]
 
 
@@ -314,6 +315,173 @@ def test_a_diagram_read_counts_for_the_book_it_was_extracted_from(
     book = json.loads(log.read_text().splitlines()[0])["book"]
     other = ".pgnify/books/other-000000000000/images/page1-1.png"
     _log_reading(log, other, {"book": book, "result": _reading(ROOK_ON_A1)})
-    (output,) = report(tmp_path)["outputs"]
-    assert output["read"]["diagrams read"] == 0
-    assert not any("other-000000000000" in f["what"] for f in output["findings"])
+    reported = report(tmp_path)
+    assert reported["books"][0]["read"]["diagrams read"] == 0
+    files, books = _whats(reported)
+    assert not any("other-000000000000" in what for what in files + books)
+
+
+def _game(placement: str, *sans: str) -> dict[str, Any]:
+    """A build_pgn spec of a game from the placement, White to move."""
+    return {"start_fen": f"{placement} w - - 0 1", "moves": move_specs(*sans)}
+
+
+def _whats(reported: dict[str, Any]) -> tuple[list[str], list[str]]:
+    """The findings of the PGN files' sections, and those of the books' sections."""
+    files = [f["what"] for output in reported["outputs"] for f in output["findings"]]
+    books = [f["what"] for book in reported["books"] for f in book["findings"]]
+    return files, books
+
+
+def test_conversions_of_one_book_in_separate_sessions_do_not_report_each_others_diagrams(
+    primer: Path, tmp_path: Path
+) -> None:
+    log, picture = _extract_pictures(
+        primer,
+        tmp_path,
+        [
+            ("build_pgn", {"spec": _game(ROOK_ON_A1, "Ra8+"), "name": "rook"}),
+            ("write_pgn", {"names": ["rook"], "file": "rook"}),
+        ],
+    )
+    _log_reading(log, picture, {"result": _reading(ROOK_ON_A1)})
+    call_tools(
+        primer,
+        tmp_path,
+        [
+            ("build_pgn", {"spec": _game(KNIGHT_ON_B1, "Nc3"), "name": "knight"}),
+            ("write_pgn", {"names": ["knight"], "file": "knight"}),
+        ],
+    )
+    _log_reading(log, picture, {"result": _reading(KNIGHT_ON_B1)})
+    reported = report(tmp_path)
+    files, books = _whats(reported)
+    assert not any("no game" in what for what in files + books)
+    (book,) = reported["books"]
+    assert book["files"] == ["knight.pgn", "rook.pgn"]
+    assert book["read"]["diagrams read"] == 2
+
+
+def test_several_files_written_in_one_session_do_not_report_each_others_diagrams(
+    primer: Path, tmp_path: Path
+) -> None:
+    log, picture = _extract_pictures(
+        primer,
+        tmp_path,
+        [
+            ("build_pgn", {"spec": _game(ROOK_ON_A1, "Ra8+"), "name": "rook"}),
+            ("build_pgn", {"spec": _game(KNIGHT_ON_B1, "Nc3"), "name": "knight"}),
+            ("write_pgn", {"names": ["rook"], "file": "rook"}),
+            ("write_pgn", {"names": ["knight"], "file": "knight"}),
+        ],
+    )
+    _log_reading(log, picture, {"result": _reading(ROOK_ON_A1)})
+    _log_reading(log, picture, {"result": _reading(KNIGHT_ON_B1)})
+    files, books = _whats(report(tmp_path))
+    assert not any("no game" in what for what in files + books)
+
+
+def test_a_diagram_no_pgn_file_of_its_book_reaches_is_reported_once_for_the_book(
+    primer: Path, tmp_path: Path
+) -> None:
+    log, picture = _extract_pictures(
+        primer,
+        tmp_path,
+        [
+            ("build_pgn", {"spec": _game(ROOK_ON_A1, "Ra8+"), "name": "rook"}),
+            ("write_pgn", {"names": ["rook"], "file": "rook"}),
+            ("write_pgn", {"games": [ONE_GAME], "file": "other"}),
+        ],
+    )
+    _log_reading(log, picture, {"result": _reading(ROOK_ON_A1)})
+    _log_reading(log, picture, {"result": _reading(KNIGHT_ON_B1)})
+    files, books = _whats(report(tmp_path))
+    assert not any("no game" in what for what in files)
+    (unreached,) = [what for what in books if "no game" in what]
+    assert KNIGHT_ON_B1 in unreached and "this book's PGN files" in unreached
+
+
+def test_a_conversion_spread_over_two_sessions_reports_no_diagram_as_unused(
+    primer: Path, tmp_path: Path
+) -> None:
+    # The first session builds and saves the game, and a later one writes it.
+    log, picture = _extract_pictures(
+        primer, tmp_path, [("build_pgn", {"spec": _game(ROOK_ON_A1, "Ra8+"), "name": "rook"})]
+    )
+    _log_reading(log, picture, {"result": _reading(ROOK_ON_A1)})
+    call_tools(primer, tmp_path, [("write_pgn", {"names": ["rook"], "file": "rook"})])
+    files, books = _whats(report(tmp_path))
+    assert not any("no game" in what for what in files + books)
+
+
+def test_a_diagram_whose_game_a_later_session_left_out_of_the_file_is_reported(
+    primer: Path, tmp_path: Path
+) -> None:
+    log, picture = _extract_pictures(
+        primer,
+        tmp_path,
+        [
+            ("build_pgn", {"spec": _game(ROOK_ON_A1, "Ra8+"), "name": "rook"}),
+            ("build_pgn", {"spec": _game(KNIGHT_ON_B1, "Nc3"), "name": "knight"}),
+            ("write_pgn", {"names": ["rook", "knight"], "file": "forks"}),
+        ],
+    )
+    _log_reading(log, picture, {"result": _reading(ROOK_ON_A1)})
+    _log_reading(log, picture, {"result": _reading(KNIGHT_ON_B1)})
+    call_tools(
+        primer, tmp_path, [("write_pgn", {"names": ["rook"], "file": "forks", "replace": True})]
+    )
+    _, books = _whats(report(tmp_path))
+    (unreached,) = [what for what in books if "no game" in what]
+    assert KNIGHT_ON_B1 in unreached
+
+
+def test_a_doubtful_diagram_that_games_in_two_files_start_from_is_given_with_each_game(
+    primer: Path, tmp_path: Path
+) -> None:
+    log, picture = _extract_pictures(
+        primer,
+        tmp_path,
+        [
+            ("build_pgn", {"spec": _game(ROOK_ON_A1, "Ra8+"), "name": "rook"}),
+            ("write_pgn", {"names": ["rook"], "file": "first"}),
+        ],
+    )
+    call_tools(
+        primer,
+        tmp_path,
+        [
+            ("build_pgn", {"spec": _game(ROOK_ON_A1, "Kf2"), "name": "again"}),
+            ("write_pgn", {"games": [ONE_GAME], "names": ["again"], "file": "second"}),
+        ],
+    )
+    doubts = [{"square": "a1", "piece": "R", "confidence": 0.5, "second": "r"}]
+    _log_reading(log, picture, {"result": {**_reading(ROOK_ON_A1), "doubts": doubts}})
+    reported = report(tmp_path)
+    for output in reported["outputs"]:
+        (doubtful,) = [f for f in output["findings"] if "read with doubts" in f["what"]]
+        assert doubtful["game"] == 1
+    _, books = _whats(reported)
+    assert not any("doubts" in what for what in books)
+
+
+def test_report_md_says_the_logs_findings_cover_a_books_files_together(
+    primer: Path, tmp_path: Path
+) -> None:
+    call_tools(
+        primer,
+        tmp_path,
+        [
+            ("doc_text", {"first_page": 9}),
+            ("write_pgn", {"games": [ONE_GAME], "file": "a"}),
+            ("write_pgn", {"games": [ONE_GAME], "file": "b"}),
+        ],
+    )
+    reported = report(tmp_path)
+    assert all("read" not in output for output in reported["outputs"])
+    (book,) = reported["books"]
+    assert book["book"] == "pocket-primer.epub" and book["read"]["pages read"] == "9"
+    page = (tmp_path / "report.md").read_text()
+    section = page[page.index("## pocket-primer.epub: what the server's log shows") :]
+    assert "a.pgn, b.pgn" in section
+    assert "not that any one conversion is complete" in section

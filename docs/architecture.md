@@ -77,7 +77,7 @@ The plugin holds only the skill and registers no server, so users choose the boo
 
 ## Checking and reporting
 
-`pgnify check FILE.pgn [--book BOOK]` checks one PGN file, against its book when it is given. `pgnify report DIR [--images]` checks each PGN file in an output folder against the book `outputs.json` records for it, adds what the server's log shows, quotes the model's notes, and writes `report.md` and `report.json` into the folder. With `--images`, it also saves, for each doubtful game, the book's picture beside a drawing of the game's start.
+`pgnify check FILE.pgn [--book BOOK]` checks one PGN file, against its book when it is given. `pgnify report DIR [--images]` checks each PGN file in an output folder against the book `outputs.json` records for it, quotes the model's notes, adds for each book what the server's log shows across the PGN files written from it, and writes `report.md` and `report.json` into the folder. With `--images`, it also saves, for each doubtful game, the book's picture beside a drawing of the game's start.
 
 The findings are of three kinds, never mixed.
 
@@ -88,20 +88,26 @@ The findings are of three kinds, never mixed.
 - a FEN tag that is not a legal, complete position;
 - a missing result, a Result tag that differs from the result ending the moves, or a result the final position contradicts, such as 1-0 after Black mates.
 
-**Possible issues** are observations a person has to judge:
+**Possible issues** are observations a person has to judge. Those of a PGN file come from its text and its games:
 
 - squares a game's Uncertain tag marks, and positions without moves, whose moves may be in the comments;
-- a diagram read with doubts or problems, attached to the game whose start differs from the reading only on those squares or the game's uncertain ones;
-- a diagram in which the reader found no board, and one read without doubts whose placement no game starts from or reaches;
-- a picture extracted with `doc_images` and never read, the likeliest sign of a diagram left out. Pictures smaller than 64 pixels on a side are taken for figurines, and pictures covering 90% of their page for scanned pages, and neither is reported;
 - comment text not found word for word in the book, which may be paraphrase, the model's own notes, labels, or, on a scan, its corrections of the text layer; one-word sentences, such as labels, are not compared;
 - a passage of five words or more that a game's comments give more often than the book does;
+- a diagram read with doubts or problems that one of the file's games starts from: a game whose start differs from the reading only on those squares or the game's uncertain ones.
+
+Those of a book come from the server's log, of every session in the folder:
+
+- a diagram read with doubts or problems that no game in the book's PGN files starts from;
+- a diagram in which the reader found no board, and one read without doubts whose placement no game in the book's PGN files starts from or reaches;
+- a picture extracted with `doc_images` and never read, the likeliest sign of a diagram left out. Pictures smaller than 64 pixels on a side are taken for figurines, and pictures covering 90% of their page for scanned pages, and neither is reported;
 - a game built under a name and never saved;
-- the tools' errors, including those that belong to no PGN file.
+- the tools' errors. Those that belong to no PGN file's book are reported apart.
+
+The log records the book of each call, not the conversion or the session it served, so its findings belong to the book. The report matches a book's diagrams against the games of all the PGN files written from it in the folder, and says so. A diagram that some file reaches counts as found for the book, which does not show that any one conversion is complete.
 
 **The model's own account** is the notes it gave `write_pgn`, quoted as they are and not verified.
 
-A report without verified problems does not mean the conversion is complete or faithful: without a reference PGN to compare with, pgnify cannot tell whether every game, exercise, variation or passage was found. Both commands exit with status 1 on a verified problem, and with status 2 when they cannot read their input. `report.json` gives, for each PGN file, each game's label, start, plies, variations, comments and uncertain squares, and the findings, each with its game.
+A report without verified problems does not mean the conversion is complete or faithful: without a reference PGN to compare with, pgnify cannot tell whether every game, exercise, variation or passage was found. Both commands exit with status 1 on a verified problem, and with status 2 when they cannot read their input. `report.json` gives, for each PGN file, each game's label, start, plies, variations, comments and uncertain squares, and the findings, each with its game; and for each book, its PGN files, a summary of the log and the log's findings.
 
 ## The diagram reader
 
@@ -148,5 +154,5 @@ tests/
 - `slices.toml` names each slice: the part of a book, the clipped source it is converted from, and its truth.
 - `cut.py` cuts a clipped source, the files or pages of a book that hold a slice, so that a session sends a hosted model nothing else of the book.
 - `session.py` opens an interactive Claude Code session on a Claude subscription, with Claude Sonnet 5.5 at high effort and pgnify's tools alone, on a slice's clipped source.
-- `client_session.py` opens a session as a user would have it: pgnify installed with `uv tool install`, its server registered with `claude mcp add`, its skill from the plugin marketplace, and the whole book, of which the request names a part. A watchdog stops it at a cost or time limit.
+- `client_session.py` opens a session as a user would have it: pgnify installed with `uv tool install`, its server registered with `claude mcp add`, its skill from the plugin marketplace, and the whole book, of which the request names a part. A watchdog guards the experiment against a runaway or hung session: it stops a session whose cost passes a safety ceiling, or that shows no activity for half an hour, but never one that is still working. The games such a session saved but did not write are kept beside it.
 - `score_slice.py` scores a run's PGN alone against the truth, game by game: positions, main lines, the truth's variations kept or lost, commentary word for word and in place, and anything unsupported. It lists every fault for review against the model's final answer.

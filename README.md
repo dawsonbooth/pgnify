@@ -29,6 +29,8 @@ pgnify setup    # downloads 860 MB once, and keeps 310 MB in ~/.cache/pgnify
 
 Without the diagram reader or its weights, the other tools still work, and `read_diagram` tells the assistant what is missing.
 
+To update pgnify, run `uv tool upgrade pgnify`. It installs the repository's latest version, with the diagram reader if you installed it.
+
 ## Connect it to your assistant
 
 Choose what pgnify reads and where it writes:
@@ -84,7 +86,7 @@ The conversion instructions are one text, and your assistant can get them in thr
 
 Then ask for the part you want, for instance: "Convert Chapter 5 of Workbook.epub, the rook forks with their solutions, into PGN." You can also ask for an output convention, such as one game for each exercise with its solution's moves, or a numbering for the Round tag. Without one, the assistant follows the book's structure and says in its notes which convention it chose.
 
-Ask for one part at a time, such as a chapter or a section. So far pgnify has been tried on parts of up to seven games.
+Ask for one part at a time, such as a chapter or a section. The largest part tried so far is a chapter of 42 exercises and 6 examples, converted in one session.
 
 ## Output files
 
@@ -107,11 +109,9 @@ pgnify check games.pgn --book Workbook.epub
 The report sorts its findings into three kinds:
 
 - **Verified problems**: mechanical facts that need fixing, such as an illegal move, a starting position (FEN tag) that isn't legal, a missing result or one the game contradicts, or text a PGN reader would drop.
-- **Possible issues**: observations for a person to judge:
-  - squares marked uncertain, and a position given without moves;
-  - a diagram read with doubts, a diagram extracted but never read, and a diagram whose position no game reaches;
-  - comment text not found word for word in the book, and a passage given more than once;
-  - a game the assistant built and never saved, and the tools' errors.
+- **Possible issues**: observations for a person to judge.
+  - In each PGN file: squares marked uncertain, a position given without moves, comment text not found word for word in the book, a passage given more than once, and a game that starts from a diagram read with doubts.
+  - For each book, from the server's log of every session in the folder: a diagram whose position no game in the book's PGN files reaches, a diagram extracted but never read, a game the assistant built and never saved, and the tools' errors. A diagram counts as found when any of those files reaches it, so these findings show what the files hold together, not that any one conversion is complete.
 - **The model's own account**: its notes, quoted as it gave them and not verified.
 
 A report without verified problems does not mean the conversion is complete or faithful. Without a reference PGN to compare with, pgnify cannot tell whether every game, exercise, variation or passage of the book was found; it reports only what it can check. The assistant's notes prove nothing either way: they can say nothing is missing when something is. Compare the PGN with the book where it matters.

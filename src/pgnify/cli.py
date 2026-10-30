@@ -99,9 +99,9 @@ def report_(
 ) -> None:
     """Report on a conversion without a model.
 
-    Checks each PGN file in the folder against its book and the server's log, and quotes the
-    model's account separately. Writes report.md and report.json into the folder, and exits 1
-    when there is a verified problem."""
+    Checks each PGN file in the folder against its book, reports for each book what the
+    server's log shows across its PGN files, and quotes the model's account separately. Writes
+    report.md and report.json into the folder, and exits 1 when there is a verified problem."""
     from pgnify import report
 
     try:
@@ -117,6 +117,11 @@ def report_(
             f"{output['file']}: {report.counted(len(output['games']), 'game')}, "
             f"{report.counted(kinds.count('problem'), 'verified problem')}, "
             f"{report.counted(kinds.count('issue'), 'possible issue')}"
+        )
+    for book in reported["books"]:
+        typer.echo(
+            f"{book['book']}: {report.counted(len(book['findings']), 'possible issue')} in the "
+            f"server's log, across {report.counted(len(book['files']), 'PGN file')}"
         )
     if reported["findings"]:
         typer.echo(f"{report.counted(len(reported['findings']), 'tool error')} outside these files")
