@@ -41,6 +41,16 @@ part = "Chapter 5, Forks: the rook forks, with the solutions to their exercises"
 client_part = "the rook forks in Chapter 5, Forks, with their examples, their exercises and the solutions to those exercises"
 truth = "data/local/truth/workbook-rook-forks.pgn"
 
+# The whole of Chapter 5, for scale: its six basic examples and Exercises 115 to 156, with
+# their solutions. The real-client session gets longer limits than the launcher's.
+[slices.workbook-forks]
+cut = "workbook-forks"
+part = "Chapter 5, Forks, with its examples and the solutions to its exercises"
+client_part = "Chapter 5, Forks, with its examples, its exercises and the solutions to those exercises"
+truth = "data/local/truth/workbook-forks.pgn"
+client_budget_usd = 10.0
+client_minutes = 90
+
 [slices.logical-chess-14]
 cut = "logical-chess-14"
 part = "Game 14, Tarrasch – Mieses, Berlin 1916, with all its notes"

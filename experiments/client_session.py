@@ -42,9 +42,10 @@ MODEL = session.MODEL
 EFFORT = session.EFFORT
 MARKETPLACE = "dawsonbooth/pgnify"
 SKILL = "pgnify:pgnify-convert"
-# The session's limits: its cost at its model's list price, and its time.
+# The session's limits, unless its slice sets client_budget_usd and client_minutes: its cost
+# at its model's list price, and its time.
 BUDGET_USD = 3.0
-LIMIT_SECONDS = 45 * 60
+LIMIT_MINUTES = 45
 # The kinds of token the watchdog counts, each with its list price in dollars per million tokens;
 # cache writes at the one-hour rate, the higher.
 PRICE = score_slice.PRICES[MODEL]
@@ -75,6 +76,8 @@ def main() -> None:
     spec = layout["slices"][slice_name]
     book = session.book(layout["cuts"][spec["cut"]]["source"])
     part = spec.get("client_part", spec["part"])
+    budget = spec.get("client_budget_usd", BUDGET_USD)
+    limit = 60 * spec.get("client_minutes", LIMIT_MINUTES)
     # The library's file names are "Title - Author".
     title = book.stem.split(" - ")[0]
     version = session.claude_version()
@@ -92,6 +95,7 @@ def main() -> None:
     if pgnify is None or Path(pgnify).parent != tool_bin:
         sys.exit(f"pgnify is {pgnify}, not uv tool's: install it as the README says")
     pgnify_version = subprocess.run([pgnify, "--version"], capture_output=True, text=True).stdout
+    commit = _installed_commit()
     if missing := weights.missing():
         sys.exit(f"the diagram reader's weights are not installed ({len(missing)} missing)")
 
@@ -129,15 +133,15 @@ def main() -> None:
                 "model": MODEL,
                 "effort": EFFORT,
                 "claude_version": version,
-                "pgnify": {"path": pgnify, "version": pgnify_version.strip()},
+                "pgnify": {"path": pgnify, "version": pgnify_version.strip(), "commit": commit},
                 "marketplace": MARKETPLACE,
                 "book": str(book),
                 "book_sha256": hashlib.sha256(book.read_bytes()).hexdigest(),
                 "setup": setup,
                 "command": command,
                 "environment": session.ISOLATED,
-                "budget_usd": BUDGET_USD,
-                "limit_seconds": LIMIT_SECONDS,
+                "budget_usd": budget,
+                "limit_seconds": limit,
                 "differences_from_the_evaluation_sessions": DIFFERENCES,
             },
             indent=1,
@@ -145,14 +149,17 @@ def main() -> None:
     )
     session.hand_over(
         folder / "request.md",
-        f"It is stopped at ${BUDGET_USD:.2f} at list price or after {LIMIT_SECONDS // 60} minutes.",
+        f"pgnify was installed from commit {commit or 'unknown'}.\n"
+        f"It is stopped at ${budget:.2f} at list price or after {limit // 60} minutes.",
     )
     started = time.time()
     stopped: list[str] = []
     with tempfile.TemporaryDirectory(prefix="pgnify-client-") as cwd:
         process = subprocess.Popen(command, cwd=cwd, env=env)
         watchdog = threading.Thread(
-            target=_watch, args=(process, config_dir, started, stopped), daemon=True
+            target=_watch,
+            args=(process, config_dir, started, stopped, budget, limit),
+            daemon=True,
         )
         watchdog.start()
         code = process.wait()
@@ -172,16 +179,33 @@ def main() -> None:
     print(f"Score it: uv run python experiments/score_slice.py {slice_name} {folder}")
 
 
-def _watch(process: subprocess.Popen, config_dir: Path, started: float, stopped: list[str]) -> None:
-    """End the session when its cost at list price passes the budget or its time passes the
-    limit."""
+def _installed_commit() -> str | None:
+    """The commit uv tool installed pgnify from, when it came from a git repository: pgnify's
+    --version names only the release."""
+    tool_dir = subprocess.run(["uv", "tool", "dir"], capture_output=True, text=True).stdout.strip()
+    site = "lib/*/site-packages/pgnify-*.dist-info/direct_url.json"
+    for found in (Path(tool_dir) / "pgnify").glob(site):
+        return json.loads(found.read_text()).get("vcs_info", {}).get("commit_id")
+    return None
+
+
+def _watch(
+    process: subprocess.Popen,
+    config_dir: Path,
+    started: float,
+    stopped: list[str],
+    budget: float,
+    limit: int,
+) -> None:
+    """End the session when its cost at list price passes the budget, in dollars, or its time
+    passes the limit, in seconds."""
     while process.poll() is None:
         time.sleep(10)
         reason = None
-        if time.time() - started > LIMIT_SECONDS:
-            reason = f"the {LIMIT_SECONDS // 60}-minute limit"
-        elif _cost(config_dir) > BUDGET_USD:
-            reason = f"the ${BUDGET_USD:.2f} budget"
+        if time.time() - started > limit:
+            reason = f"the {limit // 60}-minute limit"
+        elif _cost(config_dir) > budget:
+            reason = f"the ${budget:.2f} budget"
         if reason and process.poll() is None:
             stopped.append(reason)
             process.terminate()
