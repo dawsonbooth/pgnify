@@ -2,7 +2,7 @@
 
 pgnify lets the AI assistant you already use convert chess books, in PDF or EPUB, into Portable Game Notation (PGN).
 
-It is a [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server. Your assistant reads the book and decides what it holds. pgnify's tools read the book's pages and diagrams, check every move with [python-chess](https://python-chess.readthedocs.io) and write the PGN. Its conversion instructions ask for every game, exercise and solution, the variations the book gives in its prose, and the book's commentary word for word. Afterwards, `pgnify report` checks the result without a model and lists what it verified and what a person should look at.
+It is a [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server. Your assistant reads the book and decides what it holds. pgnify's tools read the book's pages and diagrams, check every move with [python-chess](https://python-chess.readthedocs.io) and write the PGN. Its conversion instructions ask for every game, exercise and solution, the variations the book gives in its prose, and all the book's chess prose word for word: its commentary on the games, and its introductions, explanations and definitions, in games that hold text alone. You can ask for less, such as the games alone. Afterwards, `pgnify report` checks the result without a model and lists what it verified and what a person should look at.
 
 pgnify runs no model and needs no API key: the model is your assistant's.
 
@@ -103,6 +103,8 @@ In the `--out` folder:
 ```sh
 pgnify report ~/Chess/PGN            # writes report.md and report.json there
 pgnify report ~/Chess/PGN --images   # also saves each doubtful diagram beside its game's position
+pgnify report ~/Chess/PGN --coverage all     # also lists the book's text no comment holds
+pgnify report ~/Chess/PGN --coverage 46-103  # the same, for the pages you asked to convert
 pgnify check games.pgn --book Workbook.epub
 ```
 
@@ -113,6 +115,8 @@ The report sorts its findings into three kinds:
   - In each PGN file: squares marked uncertain, a position given without moves, comment text not found word for word in the book, a passage given more than once, and a game that starts from a diagram read with doubts.
   - For each book, from the server's log of every session in the folder: a diagram whose position no game in the book's PGN files reaches, a diagram extracted but never read, a game the assistant built and never saved, and the tools' errors. A diagram counts as found when any of those files reaches it, so these findings show what the files hold together, not that any one conversion is complete.
 - **The model's own account**: its notes, quoted as it gave them and not verified.
+
+With `--coverage`, the report also lists **possible omissions**: the book's text, on every page or on the pages you name, that no comment of its PGN files holds word for word, in runs of 10 words or more, each with its pages and an excerpt. Name the pages of the part you asked for, as `doc_text` numbers them, so that a chapter's conversion is not held to the rest of the book. The list shows textual coverage only: words a comment holds may still be at the wrong move, and words left out may have been left out on purpose, such as the publisher's pages. Shorter runs, mostly headings, captions and labels, and text the book repeats, such as navigation labels, are counted, not listed. A passage the book gives twice and the comments once is listed at both places, since nothing tells which one they keep. Other parts of the book printed on the same pages show up too, and so do a scan's misreadings.
 
 A report without verified problems does not mean the conversion is complete or faithful. Without a reference PGN to compare with, pgnify cannot tell whether every game, exercise, variation or passage of the book was found; it reports only what it can check. The assistant's notes prove nothing either way: they can say nothing is missing when something is. Compare the PGN with the book where it matters.
 
@@ -132,7 +136,7 @@ pgnify checks every path the assistant gives it, but it is not a sandbox:
 
 ## Books and copyright
 
-Use pgnify on books you own, for your own study. A PGN made with it holds the book's commentary word for word, so treat it as you would a copy of the book, and don't share it unless you have the right to. pgnify never downloads, shares or publishes books. The only book in this repository is a short book written as a test fixture and dedicated to the public domain.
+Use pgnify on books you own, for your own study. A PGN made with it holds the book's chess prose word for word, so treat it as you would a copy of the book, and don't share it unless you have the right to. pgnify never downloads, shares or publishes books. The only book in this repository is a short book written as a test fixture and dedicated to the public domain.
 
 ## Experimental: copying comments from the book
 
@@ -143,7 +147,7 @@ A span is a passage of the book's text, named by its page and line numbers. With
 | Command | What it does |
 |---|---|
 | `pgnify serve --books PATH --out DIR [--spans]` | runs the MCP server on stdin and stdout |
-| `pgnify report DIR [--images]` | reports on a conversion's output folder |
+| `pgnify report DIR [--images] [--coverage PAGES]` | reports on a conversion's output folder |
 | `pgnify check FILE.pgn [--book BOOK]` | checks one PGN file |
 | `pgnify setup [--from DIR]` | installs the diagram reader's weights |
 | `pgnify instructions` | prints the conversion instructions |

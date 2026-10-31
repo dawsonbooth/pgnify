@@ -15,6 +15,8 @@ import chess
 import chess.pgn
 
 from pgnify.chess_tools import check_pgn, nodes, ranges, read_games, render_board
+from pgnify.coverage import SHORTEST, scope_pages
+from pgnify.coverage import coverage as book_coverage
 from pgnify.outputs import read_notes, read_records
 from pgnify.prose import BookProse, bare, book_prose, passages, sentences, shortened
 
@@ -93,12 +95,15 @@ def check_file(pgn: Path, book: Path | None = None) -> dict[str, Any]:
     return {"file": str(pgn), "book": str(book) if book else None, **result, "caveat": CAVEAT}
 
 
-def report(folder: Path, images: bool = False) -> dict[str, Any]:
+def report(folder: Path, images: bool = False, coverage: str | None = None) -> dict[str, Any]:
     """Report on an output folder of `pgnify serve`: check each PGN file against its book, then,
     for each book, what the server's log shows across every session and every PGN file written
     from it in the folder, and quote the model's account separately. Writes report.md and
     report.json into the folder, and with images saves each doubtful game's diagram beside a
-    drawing of its position in report-images/."""
+    drawing of its position in report-images/. With coverage, "all" or pages such as 46-103, it
+    also gives for each book the text on those pages that no comment of its PGN files holds, as
+    possible omissions; pages need a folder of one book's PGN files."""
+    pages = scope_pages(coverage) if coverage is not None else None
     folder = folder.resolve()
     work = folder / ".pgnify"
     records = read_records(work)
@@ -107,6 +112,7 @@ def report(folder: Path, images: bool = False) -> dict[str, Any]:
     outputs = []
     # By book key: the book's name, and the PGN files written from it with their games.
     names: dict[str, str] = {}
+    paths: dict[str, Path | None] = {}
     written: dict[str, list[tuple[str, Sequence[chess.pgn.Game], list[dict[str, Any]]]]] = {}
     for pgn in sorted(path for path in folder.iterdir() if path.suffix.lower() == ".pgn"):
         record = records.get(pgn.name) or next(
@@ -123,6 +129,7 @@ def report(folder: Path, images: bool = False) -> dict[str, Any]:
         result["findings"] += [asdict(f) for f in _doubtful_starts(entries, result["games"])]
         if key:
             names[key] = record.get("book") or key
+            paths[key] = paths.get(key) or book
             written.setdefault(key, []).append((pgn.name, read_games(text), result["games"]))
         outputs.append(
             {
@@ -133,6 +140,11 @@ def report(folder: Path, images: bool = False) -> dict[str, Any]:
                 "images": _images(folder, pgn, entries, result["games"]) if images else [],
                 "model_account": read_notes(pgn),
             }
+        )
+    if pages is not None and len(written) > 1:
+        raise ValueError(
+            f"the folder holds PGN files of {len(written)} books, so name no pages: coverage of "
+            "pages needs one book's PGN files, and of all pages takes every book"
         )
     books = []
     for key, files in written.items():
@@ -148,6 +160,7 @@ def report(folder: Path, images: bool = False) -> dict[str, Any]:
                     asdict(finding)
                     for finding in _log_issues(entries, summaries, _positions(games))
                 ],
+                **({"coverage": _coverage(paths[key], games, coverage, pages)} if coverage else {}),
             }
         )
     elsewhere = [
@@ -229,11 +242,75 @@ def markdown(reported: dict[str, Any]) -> str:
         lines += ["", "### Possible issues in the log, for a person to judge", ""]
         lines += [_line(finding) for finding in book["findings"]] or ["None found."]
         lines.append("")
+        if "coverage" in book:
+            lines += _coverage_lines(book["book"], book["coverage"], files)
     if reported["findings"]:
         lines += ["## Tool errors outside these PGN files", ""]
         lines += [_line(finding) for finding in reported["findings"]]
         lines.append("")
     return "\n".join(lines)
+
+
+def _coverage(
+    book: Path | None, games: Sequence[chess.pgn.Game], scope: str, pages: list[int] | None
+) -> dict[str, Any]:
+    """The book's text on the pages of the scope that no comment of the games holds."""
+    if book is None:
+        return {"scope": scope, "book_found": False}
+    comments = [
+        text
+        for game in games
+        for node in nodes(game)
+        for text in (node.starting_comment, node.comment)
+        if text
+    ]
+    return {"scope": scope, "book_found": True, **asdict(book_coverage(book, comments, pages))}
+
+
+def _coverage_lines(book: str, found: dict[str, Any], files: str) -> list[str]:
+    """report.md's section on a book's possible omissions."""
+    lines = [f"## {_inline(book)}: its text that no comment holds", ""]
+    if not found["book_found"]:
+        return [*lines, "The book is no longer where it was, so its text was not compared.", ""]
+    pages = "every page" if found["scope"] == "all" else f"pages {_inline(found['scope'])}"
+    # Where the pages named fall in the book, to check them against the part asked for.
+    sections = "" if found["scope"] == "all" else "; ".join(map(_inline, found["sections"]))
+    lines += [
+        f"Asked for with --coverage: the book's words on {pages}"
+        + (f" ({sections})" if sections else "")
+        + f" that no comment of {files} holds, compared word for word as comments are, in runs "
+        f"of {SHORTEST} words or more. The comments hold {found['held']:,} of the "
+        f"{found['words']:,} words there.",
+        "",
+        "These are possible omissions, for a person to judge. They show textual coverage only: "
+        "words held may be at the wrong move or in the wrong game, and words left out may have "
+        "been left out on purpose, such as the publisher's pages. Text of other parts of the "
+        "book on the same pages shows here too, and on a scan, the text layer's misreadings.",
+        "",
+        "### Possible omissions, for a person to judge",
+        "",
+    ]
+    for omission in found["omissions"]:
+        first, last = omission["first_page"], omission["last_page"]
+        where = f"p. {first}" if first == last else f"pp. {first}-{last}"
+        again = (
+            ", a passage the book gives more often than the comments hold it"
+            if omission["repeated"]
+            else ""
+        )
+        lines.append(
+            f"- {where}, {omission['words']} words{again}: «{_inline(omission['excerpt'])}»"
+        )
+    if not found["omissions"]:
+        lines.append("None found.")
+    lines += [
+        "",
+        f"Not listed: {counted(found['shorter_runs'], 'shorter run')} of words no comment holds, "
+        f"{found['shorter_words']:,} words, mostly headings, captions and labels; and "
+        f"{found['furniture']:,} words of text the book repeats, such as navigation labels.",
+        "",
+    ]
+    return lines
 
 
 def as_text(checked: dict[str, Any]) -> str:
@@ -317,7 +394,8 @@ def _comment_issues(game: chess.pgn.Game, index: int, book: BookProse | None) ->
     seen: Counter[str] = Counter()
     for node in nodes(game):
         for comment in (node.starting_comment, node.comment):
-            for passage in passages(comment):
+            # A line of a comment, such as a heading or a list item, is a sentence's end.
+            for passage in (part for line in comment.split("\n") for part in passages(line)):
                 for sentence in sentences(passage):
                     plain = bare(sentence)
                     if len(plain.split()) < 2:  # a label such as "HINT" is no passage

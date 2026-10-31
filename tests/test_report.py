@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pymupdf
 import pytest
 from support import EXERCISES_PAGE, ONE_GAME, call_tools, move_specs
 
@@ -41,6 +42,17 @@ def test_uncertain_squares_and_a_position_without_moves_are_possible_issues() ->
     whats = [f["what"] for f in check(text)["findings"] if f["kind"] == "issue"]
     assert any("marks a1 as uncertain" in what for what in whats)
     assert any("a position without moves" in what for what in whats)
+
+
+def test_a_game_of_text_alone_is_no_position_without_moves_and_is_compared_with_the_book(
+    primer: Path,
+) -> None:
+    text = f'[Result "*"]\n\n{{ {FROM_THE_BOOK}\n{NOT_IN_IT} }} *\n'
+    whats = [f["what"] for f in check(text, book_prose(primer))["findings"]]
+    assert not any("position without moves" in what for what in whats)
+    flagged = [what for what in whats if "not word for word" in what]
+    assert len(flagged) == 1
+    assert "White should resign" in flagged[0]
 
 
 def test_comment_text_the_book_lacks_and_a_passage_given_twice_are_possible_issues(
@@ -144,6 +156,29 @@ def test_words_missing_altered_or_added_are_still_not_word_for_word(
     request: pytest.FixtureRequest, book: str, comment: str
 ) -> None:
     assert not_word_for_word(comment, request.getfixturevalue(book))
+
+
+@pytest.mark.parametrize(
+    ("second", "flagged"),
+    [
+        ("9th Match Game. Both sides fight for the open file.", False),
+        ("9th Match Game. Both sides fight for the open rank.", True),
+    ],
+    ids=["each-line-the-books", "a-line-altered"],
+)
+def test_a_comment_is_compared_line_by_line(tmp_path: Path, second: str, flagged: bool) -> None:
+    # The book sets a caption between the lead-in and the game's text; a comment keeps the
+    # lead-in on one line and the text, which begins with no capital, on the next.
+    doc = pymupdf.open()
+    doc.new_page().insert_textbox(
+        pymupdf.Rect(30, 30, 560, 800),
+        "Here is a whole game in which the plan works.\nKarpov Spassky Leningrad\n"
+        "9th Match Game. Both sides fight for the open file.",
+        fontsize=9,
+    )
+    doc.save(tmp_path / "game.pdf")
+    comment = f"Here is a whole game in which the plan works.\n{second}"
+    assert bool(not_word_for_word(comment, tmp_path / "game.pdf")) == flagged
 
 
 def test_each_comment_of_a_game_is_counted_once() -> None:

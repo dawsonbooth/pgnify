@@ -5,7 +5,7 @@ pgnify is an MCP toolkit for converting chess books into faithful PGN. It is not
 ## Principles
 
 - **The model interprets; tools are mechanical.** The model finds the book's structure, decides what is a game, an exercise or a variation, reads notation and prose, and resolves ambiguity. Tools do only what can be checked mechanically: chess legality and PGN with python-chess, document access with PyMuPDF, reading a diagram with a trained recogniser, and exact copying. No tool interprets prose or cleans up notation.
-- **Fidelity to the book.** A conversion keeps the moves, the variations, the commentary word for word, and the pairing of each exercise with its solution. It invents nothing, and it marks and reports what stays uncertain.
+- **Fidelity to the book.** A conversion keeps the book's chess knowledge, not only its positions: the moves, the variations, all its chess prose word for word, whether or not a position goes with it, and the pairing of each exercise with its solution. It invents nothing, and it marks and reports what stays uncertain.
 - **Minimal.** No tool, option, heuristic or format is added before an evaluation shows the need for it.
 - **Checks apart from the model's account.** pgnify reports what it can verify separately from what the model says it did, and never calls a conversion complete.
 
@@ -65,7 +65,9 @@ The server's MCP instructions name the books, say that the server writes only in
 
 ## The conversion instructions
 
-There is one source, `src/pgnify/instructions.md`. It says what a conversion keeps: every game, exercise and position; each exercise's solution, wherever the book prints it; and the book's commentary word for word, each passage once, at its place. It says to follow the book's structure, or an output convention the user asks for, such as one game for each exercise with its solution's moves. It defines a variation, and what is not one; gives the convention for a square the diagram reader doubts, which is never to choose a piece to make a game playable, but to leave the square empty and mark it in an `[Uncertain]` tag; and lists the headers. It says nothing of how to proceed or how to divide the work.
+There is one source, `src/pgnify/instructions.md`. It says what a conversion keeps: every game, exercise and position; each exercise's solution, wherever the book prints it; the book's commentary word for word, each passage once, at its place; and the rest of its chess prose, such as introductions, explanations, definitions and principles, in text-only games among the others, in the book's order. It leaves out only what is not about chess, such as the publisher's pages, unless the user asks for less. It asks for the book's characters as printed, and a line for each heading and list item. It says to follow the book's structure, its headings included, or an output convention the user asks for, such as one game for each exercise with its solution's moves. It defines the main line, the moves played in a game or the line the book plays out from a position, and a variation, and what is neither; gives the convention for a square the diagram reader doubts, which is never to choose a piece to make a game playable, but to leave the square empty and mark it in an `[Uncertain]` tag; and lists the headers. It says nothing of how to proceed or how to divide the work.
+
+A text-only game is a game like any other to the tools: `build_pgn` builds it from a spec with a comment and no moves, and `pgnify report` compares its comment with the book. Having no FEN, it is not reported as a position without moves.
 
 The model gets the text in one of three ways:
 
@@ -77,9 +79,9 @@ The plugin holds only the skill and registers no server, so users choose the boo
 
 ## Checking and reporting
 
-`pgnify check FILE.pgn [--book BOOK]` checks one PGN file, against its book when it is given. `pgnify report DIR [--images]` checks each PGN file in an output folder against the book `outputs.json` records for it, quotes the model's notes, adds for each book what the server's log shows across the PGN files written from it, and writes `report.md` and `report.json` into the folder. With `--images`, it also saves, for each doubtful game, the book's picture beside a drawing of the game's start.
+`pgnify check FILE.pgn [--book BOOK]` checks one PGN file, against its book when it is given. `pgnify report DIR [--images] [--coverage PAGES]` checks each PGN file in an output folder against the book `outputs.json` records for it, quotes the model's notes, adds for each book what the server's log shows across the PGN files written from it, and writes `report.md` and `report.json` into the folder. With `--images`, it also saves, for each doubtful game, the book's picture beside a drawing of the game's start.
 
-The findings are of three kinds, never mixed.
+The findings are of three kinds, never mixed, and a fourth is given only when asked for.
 
 **Verified problems** are mechanical facts that need fixing:
 
@@ -91,7 +93,7 @@ The findings are of three kinds, never mixed.
 **Possible issues** are observations a person has to judge. Those of a PGN file come from its text and its games:
 
 - squares a game's Uncertain tag marks, and positions without moves, whose moves may be in the comments;
-- comment text not found word for word in the book, which may be paraphrase, the model's own notes, labels, or, on a scan, its corrections of the text layer; one-word sentences, such as labels, are not compared. Where the layout leaves the book's words in doubt, the book's text is read in each way it may be meant, for this comparison only: a hyphen that ends a line as printed or joined to the next word, and on a typeset page also removed; the line after a picture, which may be a caption set inside a sentence, kept or left out. A hyphen inside a line must match;
+- comment text not found word for word in the book, which may be paraphrase, the model's own notes, labels, or, on a scan, its corrections of the text layer; each line of a comment is compared on its own, as a heading or list item ends a sentence, and one-word sentences, such as labels, are not compared. Word for word means the same words in the same order, with quotes, apostrophes, dashes and spacing made uniform, so a difference of typography alone is not reported. Where the layout leaves the book's words in doubt, the book's text is read in each way it may be meant, for this comparison only: a hyphen that ends a line as printed or joined to the next word, and on a typeset page also removed; the line after a picture, which may be a caption set inside a sentence, kept or left out. A hyphen inside a line must match;
 - a passage of five words or more that a game's comments give more often than the book does;
 - a diagram read with doubts or problems that one of the file's games starts from: a game whose start differs from the reading only on those squares or the game's uncertain ones.
 
@@ -107,7 +109,9 @@ The log records the book of each call, not the conversion or the session it serv
 
 **The model's own account** is the notes it gave `write_pgn`, quoted as they are and not verified.
 
-A report without verified problems does not mean the conversion is complete or faithful: without a reference PGN to compare with, pgnify cannot tell whether every game, exercise, variation or passage was found. Both commands exit with status 1 on a verified problem, and with status 2 when they cannot read their input. `report.json` gives, for each PGN file, each game's label, start, plies, variations, comments and uncertain squares, and the findings, each with its game; and for each book, its PGN files, a summary of the log and the log's findings.
+**Possible omissions** are listed only when asked for, with `--coverage all` or `--coverage` and the pages of the part converted, such as `46-103`. Pages can be named only for a folder of one book's PGN files. `coverage.py` takes the book's text on those pages and the comments of all the book's PGN files, compared as the comments are compared with the book. Two adjustments help the comparison: a hyphen compares the same whether the next word follows on its line or not, and a figurine compares as the piece it stands for. Words with a digit in them are left out. The book's words go in stretches of five, and a stretch counts as held only as often as the comments give it. A passage the book gives twice and the comments once is therefore held at neither place, and both are listed as repeated. A comment shorter than a stretch holds its words where the book gives them in order. What the comments do not hold is listed in runs of 10 words or more, with pages and an excerpt. Shorter runs are counted, not listed. So is the book's furniture, such as navigation labels, citations and running heads: a run most of whose stretches the whole book gives three times or more, and no comment holds. The list shows textual coverage, not that what is held is in the right place, nor that what is missing was left out by mistake. Text of other parts of the book on the same pages, and a scan's misreadings, show up as possible omissions too.
+
+A report without verified problems does not mean the conversion is complete or faithful: without a reference PGN to compare with, pgnify cannot tell whether every game, exercise, variation or passage was found. With `--coverage`, it shows whether the book's words are held, not where or how. Both commands exit with status 1 on a verified problem, and with status 2 when they cannot read their input; possible omissions change neither. `report.json` gives, for each PGN file, each game's label, start, plies, variations, comments and uncertain squares, and the findings, each with its game; and for each book, its PGN files, a summary of the log and the log's findings, and with `--coverage` the pages checked, the words held and the possible omissions.
 
 ## The diagram reader
 
@@ -135,7 +139,7 @@ src/pgnify/
   server.py                       # the MCP server: its log, prompt and instructions
   books.py outputs.py             # the books it reads, and the folder it writes
   chess_tools.py doc_tools.py diagram_tools.py spans.py
-  report.py prose.py              # check and report
+  report.py prose.py coverage.py  # check and report
   cli.py                          # pgnify serve | check | report | setup | instructions
   instructions.md instructions.py # the one source of the conversion instructions
   weights.py                      # the diagram reader's weights
@@ -154,6 +158,6 @@ tests/
 - `slices.toml` names each slice: the part of a book, the clipped source it is converted from, and its truth; or a whole book, by its source, and its inventory.
 - `cut.py` cuts a clipped source, the files or pages of a book that hold a slice, so that a session sends a hosted model nothing else of the book.
 - `session.py` opens an interactive Claude Code session on a Claude subscription, with Claude Sonnet 5.5 at high effort and pgnify's tools alone, on a slice's clipped source.
-- `client_session.py` opens a session as a user would have it: pgnify installed with `uv tool install`, its server registered with `claude mcp add`, its skill from the plugin marketplace, and the whole book, of which the request names a part, or which it names whole. Of Claude Code's own tools, the model has only those that plan and delegate work, so the book reaches it through pgnify alone. A watchdog guards the experiment against a runaway or hung session: it stops a session whose cost, its subagents' included, passes a safety ceiling, or that shows no activity for half an hour, but never one that is still working. The games such a session saved but did not write are kept beside it.
+- `client_session.py` opens a session as a user would have it: pgnify installed with `uv tool install`, its server registered with `claude mcp add`, its skill from the plugin marketplace, and the whole book, of which the request names a part, or which it names whole. It opens a session only when the pgnify installed and the marketplace's skill are the checkout's, committed and pushed, so that a run tests what the checkout holds. Of Claude Code's own tools, the model has only those that plan and delegate work, so the book reaches it through pgnify alone. A watchdog guards the experiment against a runaway or hung session: it stops a session whose cost, its subagents' included, passes a safety ceiling, or that shows no activity for half an hour, but never one that is still working. The games such a session saved but did not write are kept beside it.
 - `score_slice.py` scores a run's PGN alone against the truth, game by game: positions, main lines, the truth's variations kept or lost, commentary word for word and in place, and anything unsupported. It lists every fault for review against the model's final answer, and accounts for the session agent by agent, the advisor's share apart.
 - `score_book.py` compares a whole-book run's PGN with the book's inventory: the boards each game starts from or reaches, the tests and their solutions, the named games, the commentary page by page, and work overwritten or lost between the session's agents. It shows what is missing, not that what is there is right: that takes a review by hand.

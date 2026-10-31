@@ -96,6 +96,14 @@ def report_(
         bool,
         typer.Option(help="Also save each doubtful diagram beside its game's position."),
     ] = False,
+    coverage: Annotated[
+        str | None,
+        typer.Option(
+            help="Also list, as possible omissions, the book's text on these pages that no "
+            "comment holds: all, or the pages the conversion was asked for, as doc_text numbers "
+            "them, such as 46-103 or 175-227,876-883."
+        ),
+    ] = None,
 ) -> None:
     """Report on a conversion without a model.
 
@@ -105,7 +113,7 @@ def report_(
     from pgnify import report
 
     try:
-        reported = report.report(folder, images=images)
+        reported = report.report(folder, images=images, coverage=coverage)
     except _FAILURES as error:
         _fail("report", error)
     typer.echo(f"Wrote {folder / 'report.md'} and {folder / 'report.json'}.")
@@ -123,6 +131,12 @@ def report_(
             f"{book['book']}: {report.counted(len(book['findings']), 'possible issue')} in the "
             f"server's log, across {report.counted(len(book['files']), 'PGN file')}"
         )
+        if book.get("coverage", {}).get("book_found"):
+            omissions = book["coverage"]["omissions"]
+            typer.echo(
+                f"{book['book']}: {report.counted(len(omissions), 'possible omission')}, "
+                f"{sum(omission['words'] for omission in omissions):,} words"
+            )
     if reported["findings"]:
         typer.echo(f"{report.counted(len(reported['findings']), 'tool error')} outside these files")
     typer.echo(report.CAVEAT)
