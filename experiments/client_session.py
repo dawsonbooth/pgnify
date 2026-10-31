@@ -23,7 +23,9 @@ Writes experiments/results/real-client/<slice>/<timestamp>/: request.md; command
 version of Claude Code; work/, the server's output folder; claude-config/, whose session logs
 are the transcripts, the subagents' among them; and, when Claude Code exits, session.json and
 unwritten.pgn, the games the server saved that no PGN file was written from, if there are any,
-so that work a session left unfinished stays visible. Score a part with
+so that work a session left unfinished stays visible. session.json gives the time to the final
+answer apart from the time Claude Code was open, which counts the wait for the person to exit
+too. Score a part with
 experiments/score_slice.py SLICE FOLDER, and a whole book with experiments/score_book.py.
 
     uv run python experiments/client_session.py SLICE
@@ -200,6 +202,7 @@ def main() -> None:
             {
                 "exit_code": code,
                 "open_seconds": round(time.time() - started, 1),
+                "seconds_to_final_answer": _to_final_answer(folder),
                 "stopped_by": stopped[0] if stopped else None,
                 "cost_usd_at_list": round(_cost(config_dir), 4),
                 "unwritten_games": [name for name, _ in unwritten],
@@ -239,6 +242,15 @@ def _untested(commit: str | None) -> str | None:
     if subprocess.run(changes, capture_output=True, text=True).stdout:
         return "src/ or plugin/ has changes that no commit holds"
     return None
+
+
+def _to_final_answer(folder: Path) -> float | None:
+    """The seconds from the request to the session's last message, its subagents' included, as
+    score_slice.py counts them; None if no request was sent."""
+    try:
+        return score_slice._session(folder)["wall_seconds"]
+    except ValueError:
+        return None
 
 
 def _unwritten(work: Path) -> list[tuple[str, str]]:
