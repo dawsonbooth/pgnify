@@ -2,9 +2,15 @@
 notation, with typography and spacing made uniform, cut into sentences. `pgnify check` and
 `pgnify report` look for each sentence of a PGN file's comments in the book's text, and the
 evaluation's scorer compares a run's comments with its truth's the same way. Move notation is
-left out of both, so that a book's figurines and a comment's piece letters compare equal."""
+left out of both, so that a book's figurines and a comment's piece letters compare equal.
+
+Where the layout leaves the book's words in doubt, at a hyphen that ends a line and at the line
+after a picture, which may be its caption set inside a sentence, the book's text is read in each
+way it may be meant, for the comparison alone: a sentence is the book's when one of the readings
+holds it. The text the tools give the model stays as the book's layout has it."""
 
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 import pymupdf
@@ -44,6 +50,14 @@ ALPHANUMERIC = re.compile(r"[^\W_]")
 # A word that ends a sentence, and one that can begin the next.
 _ENDS_SENTENCE = re.compile(r"[.!?][\"']*$")
 _BEGINS_SENTENCE = re.compile(r"[\"']?[A-Z]")
+# A hyphen that ends a line, before a word on the next. The line may break after a hyphen of the
+# book's own ("e6-pawn") or at the space after one ("the d- and f-pawns"); on a typeset page the
+# hyphen may also be the typesetter's, splitting one word ("inevi-table"). A hyphen inside a line
+# is the book's.
+LINE_END_HYPHEN = re.compile(r"(?<=\w)-[ \t]*\n(?=\w)")
+# A picture on a line of its own, and the line after it, which may be the picture's caption
+# ("DIAGRAM 2. White to play"), set where the picture interrupts a sentence.
+CAPTION = re.compile(r"^(\[picture \d+: [0-9a-f]{6}\]\n)[^\n]*\n", re.MULTILINE)
 
 
 def bare(text: str) -> str:
@@ -132,7 +146,39 @@ def shortened(text: str, words: int) -> str:
     return " ".join(parts[:words]) + (" …" if len(parts) > words else "")
 
 
-def book_prose(path: Path | str) -> str:
-    """The prose of a book's pages, as comments' prose is compared with it."""
+@dataclass(frozen=True)
+class BookProse:
+    """A book's prose as comments' prose is compared with it: each of its readings, bare and
+    padded with spaces."""
+
+    readings: tuple[str, ...]
+
+    def holds(self, words: str) -> bool:
+        """Whether a reading holds the bare words, as whole words."""
+        return any(f" {words} " in reading for reading in self.readings)
+
+    def count(self, words: str) -> int:
+        """How many times the book gives the bare words, in the reading that gives them most."""
+        return max(reading.count(f" {words} ") for reading in self.readings)
+
+
+def book_prose(path: Path | str) -> BookProse:
+    """The prose of a book's pages, in each of its readings, as comments' prose is compared with
+    it."""
     with pymupdf.open(path) as doc:
-        return " ".join(prose(page_text(page)) for page in doc)
+        text = "".join(page_text(page) for page in doc)
+        typeset = not doc.is_reflowable
+    found = (f" {bare(prose(reading))} " for reading in readings(text, typeset))
+    return BookProse(tuple(dict.fromkeys(found)))
+
+
+def readings(text: str, typeset: bool) -> list[str]:
+    """The ways to read a book's text where its layout leaves the words in doubt: each hyphen
+    that ends a line as printed, and joined to the word after it; on a typeset page, also
+    removed, as the typesetter's; and each line after a picture kept, and left out as a caption.
+    A page laid out from an EPUB breaks lines only where the book's text allows, so its hyphens
+    are all the book's."""
+    joined = [text, LINE_END_HYPHEN.sub("-", text)]
+    if typeset:
+        joined.append(LINE_END_HYPHEN.sub("", text))
+    return [reading for each in joined for reading in (each, CAPTION.sub(r"\1", each))]

@@ -107,6 +107,17 @@ def test_doc_text_marks_a_picture_inside_the_line_of_text_it_sits_in(inline_pict
     assert lines[3] == "After the diagram."
 
 
+def test_doc_text_keeps_a_hyphen_that_ends_a_line_and_a_caption_as_laid_out(
+    reflowed: Path,
+) -> None:
+    """The report reads these both ways when it compares comments with the book; the text the
+    model is given stays as it is."""
+    lines = doc_text(str(reflowed), 1)["pages"][0]["text"].splitlines()
+    assert lines[:2] == ["White aims to win the e6-", "pawn by doubling rooks on the d-file."]
+    assert re.fullmatch(r"\[picture 1: [0-9a-f]{6}\]", lines[5]), lines
+    assert lines[6:8] == ["DIAGRAM 2. White to play", "trade the bishops and attack the weak pawn."]
+
+
 def test_doc_search_finds_text_in_an_epub_with_its_page_box_and_line(primer: Path) -> None:
     hits = doc_search(str(primer), "Kxc6")["hits"]
     assert [(hit["page"], hit["section"]) for hit in hits] == [(9, [CHAPTER_1, RETI["title"]])]

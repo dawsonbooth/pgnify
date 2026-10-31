@@ -47,7 +47,16 @@ import chess.pgn
 import session
 
 from pgnify.chess_tools import nodes, read_games
-from pgnify.prose import bare, book_prose, notated_passages, passages, prose, sentences, shortened
+from pgnify.prose import (
+    BookProse,
+    bare,
+    book_prose,
+    notated_passages,
+    passages,
+    prose,
+    sentences,
+    shortened,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 OPTIONAL = "[%optional]"
@@ -106,7 +115,7 @@ def main() -> None:
 
 
 def score_run(
-    run: Path, truth: Sequence[chess.pgn.Game], source: str
+    run: Path, truth: Sequence[chess.pgn.Game], source: BookProse
 ) -> tuple[dict[str, Any], str]:
     """A run's score, and its faults as a page for the review."""
     output = [
@@ -134,7 +143,7 @@ def running_lines(running: dict[str, Any]) -> list[str]:
 
 
 def score_output(
-    truth: Sequence[chess.pgn.Game], output: Sequence[chess.pgn.Game], source: str
+    truth: Sequence[chess.pgn.Game], output: Sequence[chess.pgn.Game], source: BookProse
 ) -> tuple[dict[str, Any], list[str]]:
     """Score a run's games against the truth's, and list the faults found."""
     pairs = _pair(truth, output)
@@ -320,7 +329,7 @@ def _holds(text: str, unit: str) -> bool:
 def _score_extra_words(
     truth: Sequence[chess.pgn.Game],
     output: Sequence[chess.pgn.Game],
-    source: str,
+    source: BookProse,
     counts: Counter[str],
     faults: list[str],
 ) -> None:
@@ -333,13 +342,12 @@ def _score_extra_words(
         bare(unit).split()
         for unit in {unit for game in truth for _, t in _comments(game) for unit, _ in _units(t)}
     ]
-    source = f" {bare(source)} "
     for index, game in enumerate(output):
         tree = _paths(game)
         for where, text in _comments(game):
             for stretch in _uncovered(text, known):
                 piece = " ".join(stretch)
-                if f" {piece} " in source:
+                if source.holds(piece):
                     counts["source_words_outside_truth"] += len(stretch)
                 elif _near_any(stretch, known):
                     counts["near_words"] += len(stretch)

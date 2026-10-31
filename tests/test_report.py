@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
 from support import EXERCISES_PAGE, ONE_GAME, call_tools, move_specs
 
 from pgnify.prose import book_prose
@@ -59,6 +60,90 @@ def test_a_comment_opening_a_variation_is_compared_with_the_book(primer: Path) -
     text = f'[Result "*"]\n\n1. e4 ( {{ {NOT_IN_IT} }} 1. d4 ) 1... e5 *\n'
     whats = [f["what"] for f in check(text, book_prose(primer))["findings"]]
     assert any("not word for word in the book" in what for what in whats)
+
+
+def not_word_for_word(comment: str, book: Path) -> list[str]:
+    """What check finds of a game with the comment, against the book, that is not the book's text
+    word for word."""
+    text = f'[Result "*"]\n\n1. e4 {{ {comment} }} *\n'
+    findings = check(text, book_prose(book))["findings"]
+    return [f["what"] for f in findings if "not word for word in the book" in f["what"]]
+
+
+@pytest.mark.parametrize(
+    "comment",
+    [
+        "White aims to win the e6-pawn by doubling rooks on the d-file.",
+        "White aims to win the e6- pawn by doubling rooks on the d-file.",
+        "The knight on e5 blockades the d- and f-pawns at once.",
+    ],
+    ids=["joined", "as-printed", "suspended"],
+)
+def test_a_comment_may_join_the_word_after_a_hyphen_that_ends_a_line(
+    reflowed: Path, comment: str
+) -> None:
+    assert not_word_for_word(comment, reflowed) == []
+
+
+@pytest.mark.parametrize(
+    "comment",
+    [
+        "Black cannot stop the inevitable mate on the h-file.",
+        "Black cannot stop the inevi-table mate on the h-file.",
+    ],
+    ids=["unhyphenated", "joined"],
+)
+def test_a_comment_may_join_a_word_a_typeset_page_hyphenates(typeset: Path, comment: str) -> None:
+    assert not_word_for_word(comment, typeset) == []
+
+
+@pytest.mark.parametrize(
+    "comment",
+    [
+        "Here the plan is simple: trade the bishops and attack the weak pawn.",
+        "Here the plan is simple: DIAGRAM 2. White to play trade the bishops and attack the weak "
+        "pawn.",
+        "DIAGRAM 2. White to play",
+    ],
+    ids=["left-out", "kept", "alone"],
+)
+def test_a_comment_may_leave_out_or_keep_a_caption_inside_a_sentence(
+    reflowed: Path, comment: str
+) -> None:
+    assert not_word_for_word(comment, reflowed) == []
+
+
+@pytest.mark.parametrize(
+    ("book", "comment"),
+    [
+        ("reflowed", "White aims to win the e6-pawn by doubling on the d-file."),
+        ("reflowed", "White aims to win the e5-pawn by doubling rooks on the d-file."),
+        ("reflowed", "White aims to win the e6-pawn by doubling rooks on the dfile."),
+        ("reflowed", "White aims to win the e6pawn by doubling rooks on the d-file."),
+        ("reflowed", "The knight on e5 blockades the dand f-pawns at once."),
+        ("reflowed", "Here the plan is simple: trade the dark bishops and attack the weak pawn."),
+        ("reflowed", "Here the plan is simple: DIAGRAM 2. Black to play trade the bishops."),
+        ("reflowed", "Here the plan is simple: Nothing else matters in the position."),
+        ("typeset", "Black cannot stop the inevi table mate on the h-file."),
+        ("typeset", "Black cannot stop the inevitable mate on the hfile."),
+    ],
+    ids=[
+        "word-missing",
+        "word-altered",
+        "inner-hyphen-dropped",
+        "epub-hyphen-dropped",
+        "suspended-hyphen-dropped",
+        "word-invented",
+        "caption-altered",
+        "line-after-caption-skipped",
+        "hyphen-dropped-not-joined",
+        "typeset-inner-hyphen-dropped",
+    ],
+)
+def test_words_missing_altered_or_added_are_still_not_word_for_word(
+    request: pytest.FixtureRequest, book: str, comment: str
+) -> None:
+    assert not_word_for_word(comment, request.getfixturevalue(book))
 
 
 def test_each_comment_of_a_game_is_counted_once() -> None:

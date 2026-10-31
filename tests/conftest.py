@@ -1,11 +1,11 @@
-"""Shared fixtures: the CC0 Pocket Endgame Primer packed as an EPUB, and small PDFs drawn for the
-tests."""
+"""Shared fixtures: the CC0 Pocket Endgame Primer packed as an EPUB, and small PDFs and an EPUB
+made for the tests."""
 
 from pathlib import Path
 
 import pymupdf
 import pytest
-from support import PRIMER, png, write_epub
+from support import PRIMER, png, write_epub, write_text_epub
 
 
 @pytest.fixture(scope="session")
@@ -95,5 +95,35 @@ def hyphenated(tmp_path_factory: pytest.TempPathFactory) -> Path:
     for index, line in enumerate(["The pawn is a well-", "known runner, as everyone sees."]):
         page.insert_text((40, 60 + 16 * index), line, fontsize=11)
     path = tmp_path_factory.mktemp("pdf") / "hyphenated.pdf"
+    doc.save(path)
+    return path
+
+
+@pytest.fixture(scope="session")
+def reflowed(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """An EPUB page as PyMuPDF lays it out: a line that breaks after the hyphen of "e6-pawn",
+    one that breaks at the space after the hyphen of "d- and f-pawns", and a diagram whose
+    caption interrupts a sentence."""
+    body = (
+        "<p>White aims to win the e6-<br/>pawn by doubling rooks on the d-file.</p>"
+        "<p>The knight on e5 blockades the d-<br/>and f-pawns at once.</p>"
+        "<p>Here the plan is simple:</p>"
+        '<div><img src="board.png" alt="board"/></div>'
+        "<p>DIAGRAM 2. White to play</p>"
+        "<p>trade the bishops and attack the weak pawn.</p>"
+        "<p>Nothing else matters in the position.</p>"
+    )
+    return write_text_epub(tmp_path_factory.mktemp("epub") / "reflowed.epub", body)
+
+
+@pytest.fixture(scope="session")
+def typeset(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A PDF page whose first line ends in a hyphen that splits a word, as a typesetter
+    hyphenates, and whose second holds a compound's hyphen."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=400, height=600)
+    for index, line in enumerate(["Black cannot stop the inevi-", "table mate on the h-file."]):
+        page.insert_text((40, 60 + 16 * index), line, fontsize=11)
+    path = tmp_path_factory.mktemp("pdf") / "typeset.pdf"
     doc.save(path)
     return path

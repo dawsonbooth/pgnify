@@ -91,7 +91,7 @@ The findings are of three kinds, never mixed.
 **Possible issues** are observations a person has to judge. Those of a PGN file come from its text and its games:
 
 - squares a game's Uncertain tag marks, and positions without moves, whose moves may be in the comments;
-- comment text not found word for word in the book, which may be paraphrase, the model's own notes, labels, or, on a scan, its corrections of the text layer; one-word sentences, such as labels, are not compared;
+- comment text not found word for word in the book, which may be paraphrase, the model's own notes, labels, or, on a scan, its corrections of the text layer; one-word sentences, such as labels, are not compared. Where the layout leaves the book's words in doubt, the book's text is read in each way it may be meant, for this comparison only: a hyphen that ends a line as printed or joined to the next word, and on a typeset page also removed; the line after a picture, which may be a caption set inside a sentence, kept or left out. A hyphen inside a line must match;
 - a passage of five words or more that a game's comments give more often than the book does;
 - a diagram read with doubts or problems that one of the file's games starts from: a game whose start differs from the reading only on those squares or the game's uncertain ones.
 

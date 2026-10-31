@@ -57,6 +57,29 @@ def write_epub(destination: Path, files: Mapping[str, str | bytes]) -> Path:
     return destination
 
 
+def write_text_epub(destination: Path, body: str) -> Path:
+    """An EPUB of one XHTML file with the body given, whose pictures may show board.png, a grey
+    square."""
+    files = {
+        "META-INF/container.xml": (PRIMER / "META-INF" / "container.xml").read_bytes(),
+        "OEBPS/content.opf": (
+            '<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="2.0" '
+            'unique-identifier="id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/">'
+            '<dc:title>Text</dc:title><dc:identifier id="id">pgnify-test</dc:identifier>'
+            "<dc:language>en</dc:language></metadata><manifest>"
+            '<item id="text" href="text.xhtml" media-type="application/xhtml+xml"/>'
+            '<item id="board" href="board.png" media-type="image/png"/></manifest>'
+            '<spine><itemref idref="text"/></spine></package>'
+        ),
+        "OEBPS/text.xhtml": (
+            '<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"><head></head>'
+            f"<body>{body}</body></html>"
+        ),
+        "OEBPS/board.png": png(160, 160, 200),
+    }
+    return write_epub(destination, files)
+
+
 def in_session[T](
     books: Path, out: Path, act: Callable[[Client], Awaitable[T]], spanned: bool = False
 ) -> T:

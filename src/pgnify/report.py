@@ -16,7 +16,7 @@ import chess.pgn
 
 from pgnify.chess_tools import check_pgn, nodes, ranges, read_games, render_board
 from pgnify.outputs import read_notes, read_records
-from pgnify.prose import bare, book_prose, passages, sentences, shortened
+from pgnify.prose import BookProse, bare, book_prose, passages, sentences, shortened
 
 CAVEAT = (
     "A report without verified problems does not mean the conversion is complete or faithful. "
@@ -45,7 +45,7 @@ class Finding:
     game: int | None = None
 
 
-def check(text: str, book: str | None = None) -> dict[str, Any]:
+def check(text: str, book: BookProse | None = None) -> dict[str, Any]:
     """Check PGN text of one or more games and, given book, the book's prose from book_prose,
     compare their comments with it. Returns a summary of each game, and the findings."""
     checked = check_pgn(text)
@@ -59,7 +59,6 @@ def check(text: str, book: str | None = None) -> dict[str, Any]:
         Finding("problem", f"text a PGN reader drops, at {dropped}")
         for dropped in checked["dropped"]
     ]
-    padded = f" {bare(book)} " if book is not None else None
     for index, game in enumerate(games, start=1):
         if uncertain := game.headers.get("Uncertain", "").split():
             findings.append(
@@ -79,7 +78,7 @@ def check(text: str, book: str | None = None) -> dict[str, Any]:
                     index,
                 )
             )
-        findings += _comment_issues(game, index, padded)
+        findings += _comment_issues(game, index, book)
     summaries = [
         _summary(game, counted, index)
         for index, (game, counted) in enumerate(zip(games, checked["games"], strict=True), 1)
@@ -104,7 +103,7 @@ def report(folder: Path, images: bool = False) -> dict[str, Any]:
     work = folder / ".pgnify"
     records = read_records(work)
     log = _log(work / "log.jsonl")
-    prose_of: dict[Path, str] = {}
+    prose_of: dict[Path, BookProse] = {}
     outputs = []
     # By book key: the book's name, and the PGN files written from it with their games.
     names: dict[str, str] = {}
@@ -311,9 +310,9 @@ def _positions(games: Sequence[chess.pgn.Game]) -> set[str]:
     return positions
 
 
-def _comment_issues(game: chess.pgn.Game, index: int, padded: str | None) -> list[Finding]:
-    """Comment text that the book's prose, padded with spaces, does not hold word for word, and
-    passages a game gives more often than the book does."""
+def _comment_issues(game: chess.pgn.Game, index: int, book: BookProse | None) -> list[Finding]:
+    """Comment text that no reading of the book's prose holds word for word, and passages a game
+    gives more often than the book does."""
     findings = []
     seen: Counter[str] = Counter()
     for node in nodes(game):
@@ -324,7 +323,7 @@ def _comment_issues(game: chess.pgn.Game, index: int, padded: str | None) -> lis
                     if len(plain.split()) < 2:  # a label such as "HINT" is no passage
                         continue
                     seen[plain] += 1
-                    if padded is not None and f" {plain} " not in padded:
+                    if book is not None and not book.holds(plain):
                         quoted = shortened(sentence, QUOTED_WORDS)
                         findings.append(
                             Finding(
@@ -335,7 +334,7 @@ def _comment_issues(game: chess.pgn.Game, index: int, padded: str | None) -> lis
                         )
     for plain, count in seen.items():
         repeated = count > 1 and len(plain.split()) >= MIN_REPEATED_WORDS
-        if repeated and (padded is None or padded.count(f" {plain} ") < count):
+        if repeated and (book is None or book.count(plain) < count):
             quoted = shortened(plain, QUOTED_WORDS)
             findings.append(
                 Finding(
