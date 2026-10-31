@@ -39,7 +39,7 @@ These are pgnify's own checks, not a sandbox: the server and its diagram reader 
 | Tool | What it does |
 |---|---|
 | `doc_info` | the page count, table of contents and metadata |
-| `doc_text` | a range of pages' text, each picture marked where it sits, at most 20,000 characters a call |
+| `doc_text` | a range of pages' text, each picture marked where it sits, and in an EPUB an empty line before each paragraph, at most 20,000 characters a call |
 | `doc_search` | every hit of a text, with its page, section, box and line |
 | `doc_images` | extracts a page's pictures into the book's folder |
 | `read_diagram` | reads a diagram's placement from an extracted picture, with doubtful squares |
@@ -53,6 +53,8 @@ The tools that read a book, and those that save or write games, take `book`, whi
 
 Some books print the pieces in their moves as pictures, figurines. `doc_text` marks each picture with an id, the same wherever the same picture appears, and the chess tools take a figurine by its id in a move and read its piece from legality across the moves given: the main line first, then each variation, each line up to its last figurine. A figurine stays open where legality cannot settle it, and the pieces read in a saved game carry over to the book's other games.
 
+In an EPUB, `doc_text` puts an empty line before each line that begins a block of the book's markup, a paragraph, a heading or an item of a list, the page's first line included, so that a page that does not start with one goes on with the paragraph before it. `paragraphs.py` finds them without inferring anything from the layout: it reads the spine's XHTML, and marks a line only where the line's own text, white space aside, starts where a block's text starts. A line it cannot find stays unmarked. On three books, it marked every block of the markup on two, and all but 8 of 4,864 on the third, whose figurines and list markers the layout draws. The text's lines themselves are unchanged, and numbered text keeps its numbers, which spans name, with the empty lines unnumbered. A PDF has no markup to say where its paragraphs are, and gets no empty lines.
+
 The tools' descriptions document their mechanics, such as how a spec is built and how a variation branches. What to keep from a book, and what counts as a variation, are the conversion instructions' to say. `build_pgn`'s spec is described in place rather than by a reference to a definition, since Ollama's tool format has no `$ref`. The server runs one call at a time, since PyMuPDF is not thread-safe and a model may send several calls at once.
 
 ### What the client is told
@@ -65,7 +67,7 @@ The server's MCP instructions name the books, say that the server writes only in
 
 ## The conversion instructions
 
-There is one source, `src/pgnify/instructions.md`. It says what a conversion keeps: every game, exercise and position; each exercise's solution, wherever the book prints it; the book's commentary word for word, each passage once, at its place; and the rest of its chess prose, such as introductions, explanations, definitions and principles, in text-only games among the others, in the book's order. It leaves out only what is not about chess, such as the publisher's pages, unless the user asks for less. It asks for the book's characters as printed, and a line for each heading and list item. It says to follow the book's structure, its headings included, or an output convention the user asks for, such as one game for each exercise with its solution's moves. It defines the main line, the moves played in a game or the line the book plays out from a position, and a variation, and what is neither; gives the convention for a square the diagram reader doubts, which is never to choose a piece to make a game playable, but to leave the square empty and mark it in an `[Uncertain]` tag; and lists the headers. It says nothing of how to proceed or how to divide the work.
+There is one source, `src/pgnify/instructions.md`. It says what a conversion keeps: every game, exercise and position; each exercise's solution, wherever the book prints it; the book's commentary word for word, each passage once, at its place; and the rest of its chess prose, such as introductions, explanations, definitions and principles, in text-only games among the others, in the book's order. It leaves out only what is not about chess, such as the publisher's pages, unless the user asks for less. It asks for the book's characters as printed, and a line for each heading, paragraph and list item. It says to follow the book's structure, its headings included, or an output convention the user asks for, such as one game for each exercise with its solution's moves. It defines the main line, the moves played in a game or the line the book plays out from a position, and a variation, and what is neither; gives the convention for a diagram that is no position, such as one without kings, which keeps it as printed, its placement in a `[Diagram]` tag in place of SetUp and FEN, since no game can start from it, and for a square the diagram reader doubts, which is never to choose a piece to make a game playable, but to leave the square empty and mark it in an `[Uncertain]` tag; and lists the headers. It says nothing of how to proceed or how to divide the work.
 
 A text-only game is a game like any other to the tools: `build_pgn` builds it from a spec with a comment and no moves, and `pgnify report` compares its comment with the book. Having no FEN, it is not reported as a position without moves.
 
@@ -81,14 +83,16 @@ The plugin holds only the skill and registers no server, so users choose the boo
 
 `pgnify check FILE.pgn [--book BOOK]` checks one PGN file, against its book when it is given. `pgnify report DIR [--images] [--coverage PAGES]` checks each PGN file in an output folder against the book `outputs.json` records for it, quotes the model's notes, adds for each book what the server's log shows across the PGN files written from it, and writes `report.md` and `report.json` into the folder. With `--images`, it also saves, for each doubtful game, the book's picture beside a drawing of the game's start.
 
-The findings are of three kinds, never mixed, and a fourth is given only when asked for.
+The findings are of four kinds, never mixed, and a fifth is given only when asked for.
 
 **Verified problems** are mechanical facts that need fixing:
 
 - text that does not parse as PGN, or that python-chess would drop;
 - an illegal move;
-- a FEN tag that is not a legal, complete position;
+- a FEN tag that is not a legal, complete position, unless it keeps a diagram as the book prints it, which is a representation limitation;
 - a missing result, a Result tag that differs from the result ending the moves, or a result the final position contradicts, such as 1-0 after Black mates.
+
+**Representation limitations** are what PGN cannot hold as the book gives it, kept another way: a diagram that is no position, such as one without kings, whose placement a game keeps in its Diagram tag, since no game can start from it, so that PGN readers show the game without it. The missing kings are a verified property; the report names the picture the diagram reader read as that placement, which backs the limitation as the book's and not the conversion's. A FEN tag that keeps such a diagram is a limitation too, where a reading backs it, and the report says that PGN readers that need a legal position will not open the game, as chess.js and chessops, lichess's library, do not. A Diagram tag that no reading of the book backs is a possible issue, and a FEN tag that no reading backs stays a verified problem.
 
 **Possible issues** are observations a person has to judge. Those of a PGN file come from its text and its games:
 
@@ -138,7 +142,7 @@ pyproject.toml                    # pgnify: script `pgnify`; extra `diagrams`; A
 src/pgnify/
   server.py                       # the MCP server: its log, prompt and instructions
   books.py outputs.py             # the books it reads, and the folder it writes
-  chess_tools.py doc_tools.py diagram_tools.py spans.py
+  chess_tools.py doc_tools.py diagram_tools.py spans.py paragraphs.py
   report.py prose.py coverage.py  # check and report
   cli.py                          # pgnify serve | check | report | setup | instructions
   instructions.md instructions.py # the one source of the conversion instructions

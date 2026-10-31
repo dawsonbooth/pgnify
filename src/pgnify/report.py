@@ -1,7 +1,9 @@
 """Checks of a conversion's output, without a model. A verified problem is a mechanical fact that
-needs fixing, such as an illegal move or text a PGN reader would drop. A possible issue is an
-observation for a person to judge, such as an uncertain square or a diagram never read. The
-model's own account, the notes it gave write_pgn, is quoted separately and never verified."""
+needs fixing, such as an illegal move or text a PGN reader would drop. A representation
+limitation is what PGN cannot hold as the book gives it, kept another way, such as a diagram
+without kings, which no game can start from. A possible issue is an observation for a person to
+judge, such as an uncertain square or a diagram never read. The model's own account, the notes
+it gave write_pgn, is quoted separately and never verified."""
 
 import json
 import shutil
@@ -17,6 +19,7 @@ import chess.pgn
 from pgnify.chess_tools import check_pgn, nodes, ranges, read_games, render_board
 from pgnify.coverage import SHORTEST, scope_pages
 from pgnify.coverage import coverage as book_coverage
+from pgnify.diagram_tools import problems
 from pgnify.outputs import read_notes, read_records
 from pgnify.prose import BookProse, bare, book_prose, passages, sentences, shortened
 
@@ -36,27 +39,46 @@ SCANNED_PAGE = 0.9
 QUOTED_WORDS = 14
 ERROR_SHOWN = 300
 INITIAL = "the initial position"
+# The kinds of a PGN file's findings, in the order a report gives them, with their headings.
+KINDS = (
+    ("problem", "Verified problems"),
+    ("limitation", "Representation limitations: what PGN cannot hold as the book gives it"),
+    ("issue", "Possible issues, for a person to judge"),
+)
 
 
 @dataclass
 class Finding:
-    """A verified problem or a possible issue, of one game or of the whole file."""
+    """A verified problem, a representation limitation or a possible issue, of one game or of
+    the whole file."""
 
-    kind: Literal["problem", "issue"]
+    kind: Literal["problem", "limitation", "issue"]
     what: str
     game: int | None = None
 
 
-def check(text: str, book: BookProse | None = None) -> dict[str, Any]:
+def check(
+    text: str, book: BookProse | None = None, readings: list[dict[str, Any]] | None = None
+) -> dict[str, Any]:
     """Check PGN text of one or more games and, given book, the book's prose from book_prose,
-    compare their comments with it. Returns a summary of each game, and the findings."""
+    compare their comments with it. Given readings, the server's log entries of the diagram
+    reader's readings of the book's pictures, a FEN tag that is no position is a representation
+    limitation where a reading backs it, and a Diagram tag that no reading backs is a possible
+    issue. Returns a summary of each game, and the findings."""
     checked = check_pgn(text)
     games = read_games(text)
     findings: list[Finding] = []
     if not games:
         findings.append(Finding("problem", "no game could be read from the file"))
-    for index, counted in enumerate(checked["games"], start=1):
-        findings += [Finding("problem", error, index) for error in counted["errors"]]
+    for index, (game, counted) in enumerate(zip(games, checked["games"], strict=True), start=1):
+        # A FEN tag that keeps a diagram as the book prints it is no fault of the conversion.
+        backed = _backed_fen(game.headers, index, readings)
+        findings += [
+            Finding("problem", error, index)
+            for error in counted["errors"]
+            if not (backed and error.startswith("FEN tag "))
+        ]
+        findings += _diagram_tag(game.headers, index, readings) + ([backed] if backed else [])
     findings += [
         Finding("problem", f"text a PGN reader drops, at {dropped}")
         for dropped in checked["dropped"]
@@ -123,9 +145,9 @@ def report(folder: Path, images: bool = False, coverage: str | None = None) -> d
         if book and book not in prose_of:
             prose_of[book] = book_prose(book)
         text = pgn.read_text(encoding="utf-8", errors="replace")
-        result = check(text, prose_of[book] if book else None)
         key = record.get("book_key")
         entries = [entry for entry in log if _of_book(entry, key)] if key else []
+        result = check(text, prose_of[book] if book else None, _readings(entries) if key else None)
         result["findings"] += [asdict(f) for f in _doubtful_starts(entries, result["games"])]
         if key:
             names[key] = record.get("book") or key
@@ -201,11 +223,11 @@ def markdown(reported: dict[str, Any]) -> str:
                 f"{_cell(' '.join(game['uncertain']))} |"
             )
         lines.append("")
-        for kind, heading in (
-            ("problem", "Verified problems"),
-            ("issue", "Possible issues, for a person to judge"),
-        ):
+        for kind, heading in KINDS:
             found = [finding for finding in output["findings"] if finding["kind"] == kind]
+            # Representation limitations are rare, and get a section only when there are some.
+            if kind == "limitation" and not found:
+                continue
             lines += [f"### {heading}", ""]
             lines += [_line(finding) for finding in found] or ["None found."]
             lines.append("")
@@ -316,8 +338,10 @@ def _coverage_lines(book: str, found: dict[str, Any], files: str) -> list[str]:
 def as_text(checked: dict[str, Any]) -> str:
     """check_file's result as plain text, for `pgnify check`."""
     lines = [f"{checked['file']}: {counted(len(checked['games']), 'game')}"]
-    for kind, heading in (("problem", "Verified problems"), ("issue", "Possible issues")):
+    for kind, heading in KINDS:
         found = [finding for finding in checked["findings"] if finding["kind"] == kind]
+        if kind == "limitation" and not found:
+            continue
         lines += ["", f"{heading}:", *([_line(finding) for finding in found] or ["- none found"])]
     return "\n".join([*lines, "", checked["caveat"]])
 
@@ -350,6 +374,8 @@ def _summary(game: chess.pgn.Game, counts: dict[str, Any], index: int) -> dict[s
         "game": index,
         "label": label or "?",
         "start": _start(headers),
+        # The placement of a diagram that is no position, which the game keeps in a tag.
+        "diagram": headers.get("Diagram"),
         "plies": counts["plies"],
         "variations": counts["variations"],
         "comments": counts["comments"],
@@ -385,6 +411,76 @@ def _positions(games: Sequence[chess.pgn.Game]) -> set[str]:
             continue
         positions |= {node.board().board_fen() for node in nodes(game)}
     return positions
+
+
+def _diagram_tag(
+    headers: chess.pgn.Headers, index: int, readings: list[dict[str, Any]] | None
+) -> list[Finding]:
+    """What a game's Diagram tag holds: a diagram that is no position, a representation
+    limitation, backed by the picture the diagram reader read as its placement when there is
+    one, else a fault of the tag. readings None means no log to look in."""
+    if "Diagram" not in headers:
+        return []
+    placement = headers["Diagram"]
+    if not _readable(placement):
+        return [Finding("problem", f"its Diagram tag {placement!r} is no placement", index)]
+    if not (faults := problems(placement)):
+        return [
+            Finding(
+                "issue",
+                "its Diagram tag holds a position a game can start from: SetUp and FEN would "
+                "show it",
+                index,
+            )
+        ]
+    picture = _picture_read_as(placement, readings)
+    kept = f"{picture}'s diagram, as the diagram reader read it," if picture else "a diagram"
+    findings = [
+        Finding(
+            "limitation",
+            f"its Diagram tag keeps {kept} which is no position ({', '.join(faults)}): no game "
+            "can start from it, so PGN readers show the game without it",
+            index,
+        )
+    ]
+    if readings is not None and picture is None:
+        findings.append(
+            Finding(
+                "issue",
+                "no diagram the reader read in this book has its Diagram tag's placement: "
+                "compare it with the book's diagram",
+                index,
+            )
+        )
+    return findings
+
+
+def _backed_fen(
+    headers: chess.pgn.Headers, index: int, readings: list[dict[str, Any]] | None
+) -> Finding | None:
+    """A representation limitation, if the game's FEN tag is no position but keeps a diagram as
+    the diagram reader read a picture of the book. A FEN tag that no reading backs stays the
+    verified problem check_pgn finds."""
+    placement = _start(headers)
+    if placement == INITIAL or not _readable(placement) or not (faults := problems(placement)):
+        return None
+    if (picture := _picture_read_as(placement, readings)) is None:
+        return None
+    return Finding(
+        "limitation",
+        f"its FEN tag keeps {picture}'s diagram, as the diagram reader read it, which is no "
+        f"position ({', '.join(faults)}): PGN readers that need a legal position will not open "
+        "the game, which a Diagram tag in place of SetUp and FEN avoids",
+        index,
+    )
+
+
+def _picture_read_as(placement: str, readings: list[dict[str, Any]] | None) -> str | None:
+    """The picture of the book that the diagram reader read as the placement, if any."""
+    for entry in readings or []:
+        if entry["result"].get("placement") == placement:
+            return _picture(entry["arguments"]["image_path"])
+    return None
 
 
 def _comment_issues(game: chess.pgn.Game, index: int, book: BookProse | None) -> list[Finding]:
@@ -439,12 +535,16 @@ def _log(path: Path) -> list[dict[str, Any]]:
 
 def _doubtful_starts(entries: list[dict[str, Any]], games: list[dict[str, Any]]) -> list[Finding]:
     """The diagrams read from the book with doubts or problems that one of games, one PGN
-    file's, starts from, each given with its game."""
+    file's, starts from, each given with its game. A game that keeps the reading's placement as
+    it is has its problems as a representation limitation already, so only doubts are said."""
     findings = []
     for entry in _readings(entries):
         result = entry["result"]
-        said = _said(result) if result["ok"] else ""
-        if said and (game := _starting_from(result, games)):
+        if not result["ok"] or not (game := _starting_from(result, games)):
+            continue
+        held = next(summary for summary in games if summary["game"] == game)
+        exact = result["placement"] in (held["start"], held["diagram"])
+        if said := _said({**result, "problems": []} if exact else result):
             where = _picture(entry["arguments"]["image_path"])
             findings.append(Finding("issue", f"{where} was read with {said}", game))
     return findings
@@ -559,8 +659,12 @@ def _picture(path: str) -> str:
 
 
 def _starting_from(reading: dict[str, Any], games: list[dict[str, Any]]) -> int | None:
-    """The game whose position comes from a diagram's reading, if any."""
-    fitting = [game["game"] for game in games if game["start"] == reading["placement"]]
+    """The game whose position, or whose Diagram tag, comes from a diagram's reading, if any."""
+    fitting = [
+        game["game"]
+        for game in games
+        if reading["placement"] in (game["start"], game.get("diagram"))
+    ]
     fitting += [game["game"] for game in games if _fits(game, reading)]
     return fitting[0] if fitting else None
 
@@ -626,17 +730,19 @@ def _images(
     shown = []
     target = folder / "report-images" / pgn.stem
     for game in games:
-        if game["start"] == INITIAL or not _readable(game["start"]):
+        # A diagram that is no position, kept in a Diagram tag, is drawn as the game's start.
+        start = game.get("diagram") or game["start"]
+        if start == INITIAL or not _readable(start):
             continue
         source = next(
-            (reading for reading in readings if reading["placement"] == game["start"]), None
+            (reading for reading in readings if reading["placement"] == start), None
         ) or next((reading for reading in readings if _fits(game, reading)), None)
         doubtful = source is not None and bool(source["doubts"] or source["problems"])
         if not (game["uncertain"] or doubtful):
             continue
         target.mkdir(parents=True, exist_ok=True)
         position = target / f"game-{game['game']}-position.png"
-        render_board(game["start"], position)
+        render_board(start, position)
         drawn: dict[str, Any] = {
             "game": game["game"],
             "position": position.relative_to(folder).as_posix(),

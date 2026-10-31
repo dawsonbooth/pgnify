@@ -71,7 +71,7 @@ comment, cut to its first and last five words, to check where it begins and ends
 any span copied more than once."""
 
 NUMBERED = """Each line of text is given with its number, as "12| text", which build_pgn's
-spans name."""
+spans name; the empty lines before an EPUB's paragraphs have none."""
 
 
 def build_pgn_description() -> str:

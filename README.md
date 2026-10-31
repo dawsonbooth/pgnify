@@ -108,9 +108,10 @@ pgnify report ~/Chess/PGN --coverage 46-103  # the same, for the pages you asked
 pgnify check games.pgn --book Workbook.epub
 ```
 
-The report sorts its findings into three kinds:
+The report sorts its findings into four kinds:
 
 - **Verified problems**: mechanical facts that need fixing, such as an illegal move, a starting position (FEN tag) that isn't legal, a missing result or one the game contradicts, or text a PGN reader would drop.
+- **Representation limitations**: what PGN cannot hold as the book gives it, kept another way. A diagram that is no position, such as one without kings, keeps its placement in a Diagram tag, since no game can start from it, and PGN readers show the game without it. The report names the picture of the book that the diagram reader read as that placement, which shows the limitation is the book's, not the conversion's.
 - **Possible issues**: observations for a person to judge.
   - In each PGN file: squares marked uncertain, a position given without moves, comment text not found word for word in the book, a passage given more than once, and a game that starts from a diagram read with doubts.
   - For each book, from the server's log of every session in the folder: a diagram whose position no game in the book's PGN files reaches, a diagram extracted but never read, a game the assistant built and never saved, and the tools' errors. A diagram counts as found when any of those files reaches it, so these findings show what the files hold together, not that any one conversion is complete.

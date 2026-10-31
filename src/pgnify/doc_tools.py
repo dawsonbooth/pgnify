@@ -42,9 +42,12 @@ def doc_text(
     pictures, which have no letter in the text: give a move printed as
     "2 [picture 1: 0ebed3] c3" to validate_moves and build_pgn as "2 [0ebed3]c3", and they read
     which piece the picture is from the moves. Do not work out a picture's piece yourself, from
-    its image or otherwise. One call gives at most 20,000 characters of text, or one longer
-    page: a longer range is cut after the last whole page that fits, and next_page says where to
-    continue.
+    its image or otherwise. In an EPUB, an empty line comes before each line that begins a
+    paragraph, a heading or an item of a list, as the book's markup marks them, the page's first
+    line included: a page whose text does not start with an empty line goes on with the
+    paragraph the page before ends, and a line break with no empty line stays within its
+    paragraph. One call gives at most 20,000 characters of text, or one longer page: a longer
+    range is cut after the last whole page that fits, and next_page says where to continue.
 
     Returns pages, each with its page number, its section (the table-of-contents entries it falls
     under, outermost first) and its text; and next_page, the first page of the range not given,
@@ -53,17 +56,18 @@ def doc_text(
     last = first_page if last_page is None else last_page
     if last < first_page:
         raise ValueError(f"pages {first_page} to {last} run backwards")
+    starts: dict[int, frozenset[int]] = {}
+    if Path(path).suffix.lower() == ".epub":
+        from pgnify.paragraphs import paragraph_starts
+
+        starts = paragraph_starts(path)
     with pymupdf.open(path) as doc:
         _page(doc, last)  # Check the last page now: a range cut short never reaches it.
         toc = doc.get_toc()
         pages: list[dict[str, Any]] = []
         size = 0
         for number in range(first_page, last + 1):
-            text = page_text(_page(doc, number))
-            if numbered:
-                text = "".join(
-                    f"{index}| {line}\n" for index, line in enumerate(_lines(text), start=1)
-                )
+            text = _given(page_text(_page(doc, number)), starts.get(number, frozenset()), numbered)
             if pages and size + len(text) > TEXT_LIMIT:
                 return {"pages": pages, "next_page": number}
             pages.append({"page": number, "section": _section(toc, number), "text": text})
@@ -157,6 +161,16 @@ def page_lines(path: str, number: int) -> list[str]:
 
 def _lines(text: str) -> list[str]:
     return text.removesuffix("\n").split("\n") if text else []
+
+
+def _given(text: str, starts: frozenset[int], numbered: bool) -> str:
+    """A page's text as doc_text gives it: an empty line before each line, counted from 0, that
+    starts begins, and with numbered each line numbered from 1, the empty lines unnumbered, so
+    that the numbers stay those of page_lines."""
+    return "".join(
+        ("\n" if index in starts else "") + (f"{index + 1}| " if numbered else "") + line + "\n"
+        for index, line in enumerate(_lines(text))
+    )
 
 
 def _line_text(line: dict[str, Any]) -> str:

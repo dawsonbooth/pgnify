@@ -76,8 +76,8 @@ def check(
 ) -> None:
     """Check a PGN file without a model.
 
-    Lists verified problems, then possible issues for a person to judge, and exits 1 when there
-    is a verified problem."""
+    Lists verified problems, representation limitations, then possible issues for a person to
+    judge, and exits 1 when there is a verified problem."""
     from pgnify import report
 
     try:
@@ -121,9 +121,12 @@ def report_(
     for output in reported["outputs"]:
         kinds = [finding["kind"] for finding in output["findings"]]
         problems += kinds.count("problem")
+        limitations = kinds.count("limitation")
+        limited = f"{report.counted(limitations, 'representation limitation')}, "
         typer.echo(
             f"{output['file']}: {report.counted(len(output['games']), 'game')}, "
             f"{report.counted(kinds.count('problem'), 'verified problem')}, "
+            f"{limited if limitations else ''}"
             f"{report.counted(kinds.count('issue'), 'possible issue')}"
         )
     for book in reported["books"]:

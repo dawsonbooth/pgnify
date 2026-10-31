@@ -3,9 +3,9 @@ from pathlib import Path
 
 import pymupdf
 import pytest
-from support import EXERCISES_PAGE, PRIMER, PRIMER_PAGES, png, write_epub
+from support import EXERCISES_PAGE, PRIMER, PRIMER_PAGES, png, write_epub, write_text_epub
 
-from pgnify.doc_tools import doc_images, doc_info, doc_search, doc_text
+from pgnify.doc_tools import doc_images, doc_info, doc_search, doc_text, page_lines
 
 PICTURES = PRIMER / "OEBPS" / "images"
 RETI = {"level": 2, "title": "1.2 The Réti Manoeuvre", "page": 8}
@@ -111,11 +111,80 @@ def test_doc_text_keeps_a_hyphen_that_ends_a_line_and_a_caption_as_laid_out(
     reflowed: Path,
 ) -> None:
     """The report reads these both ways when it compares comments with the book; the text the
-    model is given stays as it is."""
-    lines = doc_text(str(reflowed), 1)["pages"][0]["text"].splitlines()
+    model is given stays as it is, but for the empty lines before its paragraphs."""
+    lines = [line for line in doc_text(str(reflowed), 1)["pages"][0]["text"].splitlines() if line]
     assert lines[:2] == ["White aims to win the e6-", "pawn by doubling rooks on the d-file."]
     assert re.fullmatch(r"\[picture 1: [0-9a-f]{6}\]", lines[5]), lines
     assert lines[6:8] == ["DIAGRAM 2. White to play", "trade the bishops and attack the weak pawn."]
+
+
+KNIGHT = (
+    "<h2>The Knight</h2>"
+    "<p>The knight is the only piece that jumps, and it moves the same way in every position it "
+    "reaches on the board.</p>"
+    "<p>Amateurs distrust it because:</p>"
+    "<ul><li>it forks their pieces;</li><li>they misuse it.</li></ul>"
+    "<p>DIAGRAM 1. White to play<br/>Smith-Jones, London 1900</p>"
+)
+FIGURINE = '<img src="board.png" alt="N" style="width:8px;height:8px"/>'
+
+
+def epub_text(tmp_path: Path, body: str, numbered: bool = False) -> list[str]:
+    """The text of each page doc_text gives for an EPUB of the body."""
+    epub = str(write_text_epub(tmp_path / "book.epub", body))
+    pages = doc_text(epub, 1, doc_info(epub)["page_count"], numbered=numbered)["pages"]
+    return [page["text"] for page in pages]
+
+
+def test_doc_text_puts_an_empty_line_before_each_paragraph_heading_and_list_item_of_an_epub(
+    tmp_path: Path,
+) -> None:
+    (text,) = epub_text(tmp_path, KNIGHT)
+    blocks = text.removeprefix("\n").removesuffix("\n").split("\n\n")
+    assert blocks[:3] == [
+        "The Knight",
+        "The knight is the only piece that jumps, and it moves the same way\n"
+        "in every position it reaches on the board.",
+        "Amateurs distrust it because:",
+    ]
+    assert [block.split()[-1] for block in blocks[3:5]] == ["pieces;", "it."]
+    # A line break within a paragraph has no empty line before it.
+    assert blocks[5] == "DIAGRAM 1. White to play\nSmith-Jones, London 1900"
+
+
+def test_doc_text_shows_whether_an_epub_page_goes_on_with_a_paragraph(tmp_path: Path) -> None:
+    sentences = " ".join(f"Sentence {number} of a long paragraph." for number in range(200))
+    pages = epub_text(tmp_path, f"<p>{sentences}</p><p>A new paragraph after it.</p>")
+    assert len(pages) > 1
+    assert pages[0].startswith("\nSentence 0 ")
+    assert not any(page.startswith("\n") for page in pages[1:])
+    assert pages[-1].endswith("\n\nA new paragraph after it.\n")
+
+
+def test_doc_text_begins_a_paragraph_at_a_figurine_that_opens_it_not_at_one_inside_it(
+    tmp_path: Path,
+) -> None:
+    body = f"<p>{FIGURINE}f3 develops a piece.</p><p>After 1 e4 e5 2 {FIGURINE}f3 hits e5.</p>"
+    (text,) = epub_text(tmp_path, body)
+    picture = r"\[picture \d: [0-9a-f]{6}\]"
+    assert re.fullmatch(
+        rf"\n{picture}f3 develops a piece\.\n\nAfter 1 e4 e5 2 {picture}f3 hits e5\.\n", text
+    ), text
+
+
+def test_doc_text_numbers_an_epubs_lines_as_spans_name_them_beside_its_paragraphs(
+    tmp_path: Path,
+) -> None:
+    (text,) = epub_text(tmp_path, KNIGHT, numbered=True)
+    numbered = [line for line in text.splitlines() if line]
+    lines = page_lines(str(tmp_path / "book.epub"), 1)
+    assert numbered == [f"{index}| {line}" for index, line in enumerate(lines, start=1)]
+    assert text.startswith("\n1| The Knight\n\n2| ")
+
+
+def test_doc_text_adds_no_empty_line_to_a_pdf(two_pages: Path) -> None:
+    for page in doc_text(str(two_pages), 1, 2)["pages"]:
+        assert not page["text"].startswith("\n") and "\n\n" not in page["text"]
 
 
 def test_doc_search_finds_text_in_an_epub_with_its_page_box_and_line(primer: Path) -> None:

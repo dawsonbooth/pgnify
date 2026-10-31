@@ -15,6 +15,8 @@ NOT_IN_IT = "White should resign at once because the pawn cannot be stopped by a
 ROOK_ON_A1 = "6k1/8/8/8/8/8/8/R5K1"
 # White's king on g1 and knight on b1, Black's king on g8.
 KNIGHT_ON_B1 = "6k1/8/8/8/8/8/8/1N4K1"
+# White's knight on c2 and Black's on d5, with no kings: a diagram that is no position.
+KNIGHTS_ALONE = "8/8/8/3n4/8/8/2N5/8"
 
 
 def test_a_sound_game_has_no_finding() -> None:
@@ -32,6 +34,20 @@ def test_a_fen_that_is_no_position_is_a_verified_problem() -> None:
     text = '[SetUp "1"]\n[FEN "8/8/8/8/8/8/8/8 w - - 0 1"]\n[Result "*"]\n\n*\n'
     findings = check(text)["findings"]
     assert ("problem", 1) in [(finding["kind"], finding["game"]) for finding in findings]
+
+
+@pytest.mark.parametrize(
+    ("placement", "kind"),
+    [
+        pytest.param(KNIGHTS_ALONE, "limitation", id="no-position-kept"),
+        pytest.param("knights", "problem", id="no-placement"),
+        pytest.param(ROOK_ON_A1, "issue", id="a-position-in-the-wrong-tag"),
+    ],
+)
+def test_a_diagram_tag_keeps_a_diagram_that_is_no_position(placement: str, kind: str) -> None:
+    text = f'[Diagram "{placement}"]\n[Result "*"]\n\n{{ Two knights. }} *\n'
+    (finding,) = check(text)["findings"]
+    assert (finding["kind"], finding["game"]) == (kind, 1)
 
 
 def test_uncertain_squares_and_a_position_without_moves_are_possible_issues() -> None:
@@ -451,6 +467,70 @@ def _whats(reported: dict[str, Any]) -> tuple[list[str], list[str]]:
     files = [f["what"] for output in reported["outputs"] for f in output["findings"]]
     books = [f["what"] for book in reported["books"] for f in book["findings"]]
     return files, books
+
+
+def _kingless_reading() -> dict[str, Any]:
+    return {**_reading(KNIGHTS_ALONE), "problems": ["no_white_king", "no_black_king"]}
+
+
+@pytest.mark.parametrize(
+    "spec",
+    [
+        pytest.param({"headers": {"Diagram": KNIGHTS_ALONE}}, id="in-a-diagram-tag"),
+        pytest.param({"start_fen": f"{KNIGHTS_ALONE} w - - 0 1"}, id="in-a-fen-tag"),
+    ],
+)
+def test_a_diagram_that_is_no_position_as_the_reader_read_it_is_a_representation_limitation(
+    primer: Path, tmp_path: Path, spec: dict[str, Any]
+) -> None:
+    log, picture = _extract_pictures(
+        primer,
+        tmp_path,
+        [
+            ("build_pgn", {"spec": {**spec, "comment": "Two knights."}, "name": "knights"}),
+            ("write_pgn", {"names": ["knights"]}),
+        ],
+    )
+    _log_reading(log, picture, {"result": _kingless_reading()})
+    reported = report(tmp_path)
+    (output,) = reported["outputs"]
+    assert not any(finding["kind"] == "problem" for finding in output["findings"])
+    (limitation,) = [f for f in output["findings"] if f["kind"] == "limitation"]
+    assert limitation["game"] == 1
+    assert Path(picture).name in limitation["what"] and "no_white_king" in limitation["what"]
+    files, books = _whats(reported)
+    # The reading's problems are the limitation's, not said again of the game or the book.
+    assert not any("was read with" in w or "no game in this book" in w for w in files + books)
+    assert "### Representation limitations" in (tmp_path / "report.md").read_text()
+
+
+def test_a_fen_that_is_no_position_and_no_reading_gives_stays_a_verified_problem(
+    primer: Path, tmp_path: Path
+) -> None:
+    spec = {"start_fen": f"{KNIGHTS_ALONE} w - - 0 1", "comment": "Two knights."}
+    log, picture = _extract_pictures(
+        primer,
+        tmp_path,
+        [("build_pgn", {"spec": spec, "name": "knights"}), ("write_pgn", {"names": ["knights"]})],
+    )
+    _log_reading(log, picture, {"result": _reading(ROOK_ON_A1)})
+    (output,) = report(tmp_path)["outputs"]
+    assert ("problem", 1) in [(finding["kind"], finding["game"]) for finding in output["findings"]]
+    assert not any(finding["kind"] == "limitation" for finding in output["findings"])
+
+
+def test_a_diagram_tag_that_no_reading_gives_is_a_possible_issue(
+    primer: Path, tmp_path: Path
+) -> None:
+    spec = {"headers": {"Diagram": KNIGHTS_ALONE}, "comment": "Two knights."}
+    call_tools(
+        primer,
+        tmp_path,
+        [("build_pgn", {"spec": spec, "name": "knights"}), ("write_pgn", {"names": ["knights"]})],
+    )
+    (output,) = report(tmp_path)["outputs"]
+    assert ("limitation", 1) in [(f["kind"], f["game"]) for f in output["findings"]]
+    assert any("no diagram the reader read" in finding["what"] for finding in output["findings"])
 
 
 def test_conversions_of_one_book_in_separate_sessions_do_not_report_each_others_diagrams(
