@@ -10,6 +10,10 @@ then prepares a run folder with an empty Claude Code configuration, registers th
 installs the plugin there, puts the request on the clipboard and opens Claude Code in an empty
 working directory. The person logs in, pastes, sends and exits when the final answer is in.
 
+A session tests pgnify and its skill as GitHub holds them, so it opens only when they are this
+checkout's: pgnify installed from its commit, with no change to src/ or plugin/ outside it, and
+the marketplace's skill the same as plugin/'s. Commit and push first, then upgrade pgnify.
+
 A watchdog guards the experiment, not pgnify, which sets no limits of its own: it ends a session
 that runs away or hangs, when its cost at list price, its subagents' and the advisor's included,
 passes a safety ceiling or when its logs show no activity for half an hour. It never ends a
@@ -50,6 +54,7 @@ MODEL = session.MODEL
 EFFORT = session.EFFORT
 MARKETPLACE = "dawsonbooth/pgnify"
 SKILL = "pgnify:pgnify-convert"
+SKILL_FILE = ROOT / "plugin" / "skills" / "pgnify-convert" / "SKILL.md"
 # Claude Code's own tools that plan and delegate work, the only ones the model is given: none
 # reads or writes files, runs commands or reaches the network, so the book reaches the model
 # through pgnify alone. ToolSearch loads the tools Claude Code defers, pgnify's among them.
@@ -110,6 +115,8 @@ def main() -> None:
         sys.exit(f"pgnify is {pgnify}, not uv tool's: install it as the README says")
     pgnify_version = subprocess.run([pgnify, "--version"], capture_output=True, text=True).stdout
     commit = _installed_commit()
+    if untested := _untested(commit):
+        sys.exit(f"{untested}: commit and push the checkout, then run uv tool upgrade pgnify")
     if missing := weights.missing():
         sys.exit(f"the diagram reader's weights are not installed ({len(missing)} missing)")
 
@@ -130,6 +137,11 @@ def main() -> None:
         done = subprocess.run(step, env=env, capture_output=True, text=True)
         if done.returncode != 0:
             sys.exit(f"{' '.join(step[:4])} failed: {done.stdout}{done.stderr}")
+    # The skill as the marketplace installed it, in each copy Claude Code keeps.
+    copies = list(config_dir.glob("plugins/**/pgnify-convert/SKILL.md"))
+    if not copies or any(copy.read_bytes() != SKILL_FILE.read_bytes() for copy in copies):
+        shutil.rmtree(folder)
+        sys.exit("the marketplace's skill is not this checkout's: push the checkout")
     command = ["claude", "--model", MODEL, "--effort", EFFORT, "--permission-mode", "dontAsk"]
     command += ["--tools", ",".join(TOOLS), "--allowedTools", *ALLOWED]
     asked = f"Convert {title}" if whole else f"Convert part of {title}"
@@ -199,8 +211,11 @@ def main() -> None:
     print(f"\nSession closed{stopped_by}. Its folder: {folder}")
     if unwritten:
         print(f"{len(unwritten)} saved games were written to no PGN file: see unwritten.pgn.")
-    scorer = "score_book.py" if whole else "score_slice.py"
-    print(f"Score it: uv run python experiments/{scorer} {slice_name} {folder}")
+    if whole or "truth" in spec:
+        scorer = "score_book.py" if whole else "score_slice.py"
+        print(f"Score it: uv run python experiments/{scorer} {slice_name} {folder}")
+    else:
+        print("It has no truth: check it as experiments/slices.toml says for its slice.")
 
 
 def _installed_commit() -> str | None:
@@ -210,6 +225,19 @@ def _installed_commit() -> str | None:
     site = "lib/*/site-packages/pgnify-*.dist-info/direct_url.json"
     for found in (Path(tool_dir) / "pgnify").glob(site):
         return json.loads(found.read_text()).get("vcs_info", {}).get("commit_id")
+    return None
+
+
+def _untested(commit: str | None) -> str | None:
+    """Why a session would not test this checkout's pgnify, if it would not: another commit is
+    installed, or src/ or plugin/ has changes that no commit holds."""
+    git = ["git", "-C", str(ROOT)]
+    head = subprocess.run([*git, "rev-parse", "HEAD"], capture_output=True, text=True).stdout
+    if commit != head.strip():
+        return f"pgnify was installed from commit {commit or 'unknown'}, not {head.strip()}"
+    changes = [*git, "status", "--porcelain", "--", "src", "plugin"]
+    if subprocess.run(changes, capture_output=True, text=True).stdout:
+        return "src/ or plugin/ has changes that no commit holds"
     return None
 
 

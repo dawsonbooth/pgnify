@@ -1,7 +1,8 @@
 # The evaluation's slices, each run on a clipped source: pages of a book in the local manifest,
 # data/local/manifest.toml (its shape: data/local/manifest.example.toml), cut by
 # experiments/cut.py into data/local/cuts/. Each slice has a truth, a reference PGN built and
-# checked by hand. A slice that names a source instead of a cut is a whole book, which only a
+# checked by hand, or says how it is checked instead. A slice that names a source instead of a
+# cut is a whole book, which only a
 # real-client session converts (experiments/client_session.py), and it has an inventory instead
 # of a truth (experiments/score_book.py). Cuts, truths and inventories hold the books' words, so
 # they stay local, under data/local/, which is not tracked.
@@ -32,6 +33,11 @@ source = "winning-chess-tactics"
 # Chapter Four, The Skewer, printed pages 47 to 49, and Chapter Twenty-Four, Solutions to Tests
 # from Part 1, printed pages 205 to 221.
 pages = [[54, 56], [201, 217]]
+
+[cuts.wcs-chapter-four]
+source = "winning-chess-strategies"
+# Chapter Four, Understanding Where the Pieces Go, as PyMuPDF lays out the EPUB.
+pages = [[46, 103]]
 
 # The part each slice's prompt names, in the book's own terms, and its truth.
 
@@ -84,3 +90,14 @@ client_ceiling_usd = 50.0
 cut = "workbook-forks"
 part = "Chapter 5, Forks: Exercise 126, with its solution"
 truth = "data/local/truth/workbook-rook-forks.pgn"
+
+# Chapter Four of Winning Chess Strategies, to check the conversion instructions that keep all
+# of a book's chess prose: the chapter's introduction and its six section introductions, which
+# the whole book's run left out under the earlier instructions, and its cases of the main line
+# and of variations. A real-client session only, with no truth: data/local/checks/
+# check_chapter.py checks it against the book's inventory, its XHTML and the publisher's
+# movetext. The safety ceiling on cost guards against runaway work and is no target.
+[slices.wcs-chapter-four]
+cut = "wcs-chapter-four"
+part = "Chapter Four, Understanding Where the Pieces Go"
+client_ceiling_usd = 15.0
