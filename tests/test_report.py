@@ -39,12 +39,13 @@ def test_a_fen_that_is_no_position_is_a_verified_problem() -> None:
 @pytest.mark.parametrize(
     ("placement", "kind"),
     [
-        pytest.param(KNIGHTS_ALONE, "limitation", id="no-position-kept"),
+        # Without the diagram reader's readings, nothing shows that the book prints it so.
+        pytest.param(KNIGHTS_ALONE, "issue", id="no-position-unbacked"),
         pytest.param("knights", "problem", id="no-placement"),
         pytest.param(ROOK_ON_A1, "issue", id="a-position-in-the-wrong-tag"),
     ],
 )
-def test_a_diagram_tag_keeps_a_diagram_that_is_no_position(placement: str, kind: str) -> None:
+def test_what_a_diagram_tag_holds_without_the_readers_readings(placement: str, kind: str) -> None:
     text = f'[Diagram "{placement}"]\n[Result "*"]\n\n{{ Two knights. }} *\n'
     (finding,) = check(text)["findings"]
     assert (finding["kind"], finding["game"]) == (kind, 1)
@@ -519,18 +520,22 @@ def test_a_fen_that_is_no_position_and_no_reading_gives_stays_a_verified_problem
     assert not any(finding["kind"] == "limitation" for finding in output["findings"])
 
 
-def test_a_diagram_tag_that_no_reading_gives_is_a_possible_issue(
+def test_a_diagram_tag_that_no_reading_gives_is_a_possible_issue_and_no_limitation(
     primer: Path, tmp_path: Path
 ) -> None:
+    # The reader read the picture with both kings, and the game's Diagram tag leaves them out.
     spec = {"headers": {"Diagram": KNIGHTS_ALONE}, "comment": "Two knights."}
-    call_tools(
+    log, picture = _extract_pictures(
         primer,
         tmp_path,
         [("build_pgn", {"spec": spec, "name": "knights"}), ("write_pgn", {"names": ["knights"]})],
     )
+    _log_reading(log, picture, {"result": _reading("6k1/8/8/3n4/8/8/2N5/6K1")})
     (output,) = report(tmp_path)["outputs"]
-    assert ("limitation", 1) in [(f["kind"], f["game"]) for f in output["findings"]]
-    assert any("no diagram the reader read" in finding["what"] for finding in output["findings"])
+    assert not any(finding["kind"] == "limitation" for finding in output["findings"])
+    (issue,) = [f for f in output["findings"] if "no diagram the reader read" in f["what"]]
+    assert (issue["kind"], issue["game"]) == ("issue", 1)
+    assert "no_white_king" in issue["what"]
 
 
 def test_conversions_of_one_book_in_separate_sessions_do_not_report_each_others_diagrams(

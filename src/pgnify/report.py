@@ -417,8 +417,9 @@ def _diagram_tag(
     headers: chess.pgn.Headers, index: int, readings: list[dict[str, Any]] | None
 ) -> list[Finding]:
     """What a game's Diagram tag holds: a diagram that is no position, a representation
-    limitation, backed by the picture the diagram reader read as its placement when there is
-    one, else a fault of the tag. readings None means no log to look in."""
+    limitation where the diagram reader read a picture of the book as its placement, and
+    otherwise a possible issue, since nothing shows that the book prints it so; else a fault of
+    the tag. readings None means no log to look in."""
     if "Diagram" not in headers:
         return []
     placement = headers["Diagram"]
@@ -433,26 +434,25 @@ def _diagram_tag(
                 index,
             )
         ]
-    picture = _picture_read_as(placement, readings)
-    kept = f"{picture}'s diagram, as the diagram reader read it," if picture else "a diagram"
-    findings = [
+    if picture := _picture_read_as(placement, readings):
+        return [
+            Finding(
+                "limitation",
+                f"its Diagram tag keeps {picture}'s diagram, as the diagram reader read it, which "
+                f"is no position ({', '.join(faults)}): no game can start from it, so PGN "
+                "readers show the game without it",
+                index,
+            )
+        ]
+    unread = ", and no diagram the reader read in this book has it" if readings is not None else ""
+    return [
         Finding(
-            "limitation",
-            f"its Diagram tag keeps {kept} which is no position ({', '.join(faults)}): no game "
-            "can start from it, so PGN readers show the game without it",
+            "issue",
+            f"its Diagram tag holds a placement that is no position ({', '.join(faults)}){unread}: "
+            "compare it with the book's diagram",
             index,
         )
     ]
-    if readings is not None and picture is None:
-        findings.append(
-            Finding(
-                "issue",
-                "no diagram the reader read in this book has its Diagram tag's placement: "
-                "compare it with the book's diagram",
-                index,
-            )
-        )
-    return findings
 
 
 def _backed_fen(
