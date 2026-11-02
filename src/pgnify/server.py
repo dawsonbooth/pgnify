@@ -4,7 +4,8 @@ folder (`pgnify serve --books PATH --out DIR`).
 Each tool is a plain function, served with its docstring as its description, except that the
 server supplies every file path itself: the document tools read only the books (books.py), by
 name, and the output tools write only the output folder (outputs.py), under plain file names.
-The model names no path but a picture's, as doc_images returns it and read_diagram takes it.
+The model names no path but a picture's, as doc_images and doc_page return it and read_diagram
+takes it.
 
 The server runs calls one at a time, since PyMuPDF is not thread-safe and a model may send
 several at once. It passes a tool's failure to the model with its reason, the server's folders
@@ -22,8 +23,9 @@ from pathlib import Path
 from typing import Annotated, Any
 
 import pymupdf
-from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver import Image, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
+from mcp.types import CallToolResult, TextContent
 from pydantic import BeforeValidator, Field
 
 from pgnify import __version__, chess_tools, diagram_tools, doc_tools, instructions, spans
@@ -89,6 +91,22 @@ def build_server(books: Path, out: Path, spanned: bool = False) -> MCPServer:
             return result
 
         return calls.run("doc_images", {"page": page}, book, extract)
+
+    def doc_page(
+        page: int, box: list[float] | None = None, book: BookName = None
+    ) -> CallToolResult:
+        def show(b: Book) -> dict[str, Any]:
+            images = str(outputs.book_folder(b).images)
+            result = doc_tools.doc_page(str(b.path), page, images, box)
+            result["path"] = Path(result["path"]).relative_to(outputs.folder).as_posix()
+            return result
+
+        result = calls.run("doc_page", {"page": page, "box": box}, book, show)
+        picture = Image(path=outputs.folder / result["path"]).to_image_content()
+        text = TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))
+        # Content blocks alone: a client may give its model a result's structured content in
+        # place of its blocks, and the picture is the point.
+        return CallToolResult(content=[text, picture])
 
     def read_diagram(image_path: str, box: list[float] | None = None) -> dict[str, Any]:
         def read(_: Book | None) -> dict[str, Any]:
@@ -185,6 +203,7 @@ def build_server(books: Path, out: Path, spanned: bool = False) -> MCPServer:
         ),
         (doc_search, doc_tools.doc_search.__doc__),
         (doc_images, doc_tools.doc_images.__doc__),
+        (doc_page, doc_tools.doc_page.__doc__),
     ):
         server.add_tool(calls.served(tool), description=description)
     spec_type = spans.SpannedGameSpec if spanned else chess_tools.GameSpec
@@ -342,6 +361,9 @@ def _summary(name: str, result: dict[str, Any], book: Book | None) -> dict[str, 
             rect = doc[result["page"] - 1].rect
         size = [round(rect.width, 1), round(rect.height, 1)]
         return {"page": result["page"], "page_size": size, "images": result["images"]}
+    if name == "doc_page":
+        keep = ("page", "box", "path", "width", "height")
+        return {key: result[key] for key in keep}
     if name == "read_diagram":
         return result
     if name == "validate_moves":

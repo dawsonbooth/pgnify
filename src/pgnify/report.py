@@ -297,13 +297,29 @@ def _coverage_lines(book: str, found: dict[str, Any], files: str) -> list[str]:
     pages = "every page" if found["scope"] == "all" else f"pages {_inline(found['scope'])}"
     # Where the pages named fall in the book, to check them against the part asked for.
     sections = "" if found["scope"] == "all" else "; ".join(map(_inline, found["sections"]))
+    textless = found["textless"]
+    held = (
+        f" The comments hold {found['held']:,} of the {found['words']:,} words there."
+        if len(textless) < len(found["pages"])
+        else ""
+    )
     lines += [
         f"Asked for with --coverage: the book's words on {pages}"
         + (f" ({sections})" if sections else "")
         + f" that no comment of {files} holds, compared word for word as comments are, in runs "
-        f"of {SHORTEST} words or more. The comments hold {found['held']:,} of the "
-        f"{found['words']:,} words there.",
+        f"of {SHORTEST} words or more.{held}",
         "",
+    ]
+    if textless:
+        lines += [
+            f"**Not assessed:** the pages without text, {_page_ranges(textless)}, "
+            f"{len(textless):,} of the {len(found['pages']):,} asked for. They hold pictures or "
+            "nothing, as a cover, a blank page or a scanned page without a text layer does, which "
+            "give nothing to compare the comments with: whether the comments hold what those "
+            "pages show is unknown, and their words are neither held nor missing here.",
+            "",
+        ]
+    lines += [
         "These are possible omissions, for a person to judge. They show textual coverage only: "
         "words held may be at the wrong move or in the wrong game, and words left out may have "
         "been left out on purpose, such as the publisher's pages. Text of other parts of the "
@@ -324,7 +340,10 @@ def _coverage_lines(book: str, found: dict[str, Any], files: str) -> list[str]:
             f"- {where}, {omission['words']} words{again}: «{_inline(omission['excerpt'])}»"
         )
     if not found["omissions"]:
-        lines.append("None found.")
+        if len(textless) == len(found["pages"]):
+            lines.append("Not assessed: none of these pages has text.")
+        else:
+            lines.append("None found" + (" on the pages with text." if textless else "."))
     lines += [
         "",
         f"Not listed: {counted(found['shorter_runs'], 'shorter run')} of words no comment holds, "
@@ -333,6 +352,18 @@ def _coverage_lines(book: str, found: dict[str, Any], files: str) -> list[str]:
         "",
     ]
     return lines
+
+
+def _page_ranges(pages: list[int]) -> str:
+    """Pages as "p. 5" or "pp. 5-10, 12", consecutive pages as a range."""
+    runs: list[list[int]] = []
+    for page in pages:
+        if runs and page == runs[-1][-1] + 1:
+            runs[-1].append(page)
+        else:
+            runs.append([page])
+    named = ", ".join(f"{run[0]}" if len(run) == 1 else f"{run[0]}-{run[-1]}" for run in runs)
+    return f"p. {named}" if len(pages) == 1 else f"pp. {named}"
 
 
 def as_text(checked: dict[str, Any]) -> str:

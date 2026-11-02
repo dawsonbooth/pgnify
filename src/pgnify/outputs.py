@@ -4,7 +4,8 @@ The PGN files sit at the top of the folder, under the plain file names the model
 with the model's notes beside it when it gave any. pgnify keeps its records in .pgnify/:
 
 - books/<key>/, a folder for each book, holding the games saved from it, the pictures extracted
-  from it and the pieces its figurines were read as, so that two books never share them;
+  from it and the pages shown from it, and the pieces its figurines were read as, so that two
+  books never share them;
 - outputs.json, the book each PGN file was written from, and from which saved games;
 - log.jsonl, every tool call, for `pgnify report`.
 
@@ -74,7 +75,7 @@ class Outputs:
         return kept
 
     def picture(self, path: str) -> Path:
-        """The extracted picture at path, which must be exactly the path doc_images returned;
+        """The picture at path, which must be exactly the path doc_images or doc_page returned;
         ValueError for any other path, a link out of the folder included."""
         resolved = (self.folder / path).resolve()
         try:
@@ -84,7 +85,8 @@ class Outputs:
             given, within = None, ()
         if path != given or len(within) < 3 or within[1] != "images" or not resolved.is_file():
             raise ValueError(
-                "image_path must be a picture doc_images extracted, by the path it gave"
+                "image_path must be a picture doc_images extracted or doc_page showed, by the "
+                "path it gave"
             )
         return resolved
 

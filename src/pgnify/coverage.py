@@ -16,7 +16,11 @@ prose.
 What the comments do not hold is cut into runs at each word they hold. Runs shorter than SHORTEST
 words are counted, not listed: they are mostly headings, captions and labels. A run most of whose
 stretches the whole book gives COMMON times or more, and no comment holds, is the book's
-furniture, such as navigation labels, citations and running heads, and is counted, not listed."""
+furniture, such as navigation labels, citations and running heads, and is counted, not listed.
+
+A page with no text, pictures alone or nothing, as a cover, a blank page or a scan's page without
+a text layer, gives nothing to compare: it is named as one whose coverage could not be assessed,
+neither held nor missing."""
 
 import re
 from collections import Counter
@@ -27,7 +31,7 @@ from pathlib import Path
 import pymupdf
 
 from pgnify.doc_tools import page_text
-from pgnify.prose import bare, passages, prose, sentences
+from pgnify.prose import PICTURE, bare, passages, prose, sentences
 
 SPAN = 5
 # The fewest words a possible omission is listed with.
@@ -75,6 +79,8 @@ class Coverage:
     omissions: list[Omission] = field(default_factory=list)
     shorter_runs: int = 0
     shorter_words: int = 0
+    # The pages of the scope with no text, whose coverage could not be assessed.
+    textless: list[int] = field(default_factory=list)
 
 
 def scope_pages(scope: str) -> list[int] | None:
@@ -112,6 +118,8 @@ def coverage(
     scope = sorted(set(pages) if pages is not None else range(1, len(texts) + 1))
     if not scope or scope[0] < 1 or scope[-1] > len(texts):
         raise ValueError(f"the pages to check must be within 1 to {len(texts)}")
+    # Before a hyphen joins a word across pages, which could move a picture's mark.
+    textless = [number for number in scope if not PICTURE.sub("", texts[number - 1]).strip()]
     # A word that a hyphen breaks across two pages goes with the first.
     for number in range(len(texts) - 1):
         if ENDS_WITH_HYPHEN.search(texts[number]) and (
@@ -180,6 +188,7 @@ def coverage(
         omissions=omissions,
         shorter_runs=len(shorter),
         shorter_words=sum(shorter),
+        textless=textless,
     )
 
 

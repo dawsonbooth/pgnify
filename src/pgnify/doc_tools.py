@@ -3,6 +3,7 @@ returning a JSON-serialisable dict. PyMuPDF lays an EPUB out as pages, so an EPU
 hold only for this layout."""
 
 import hashlib
+import math
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,13 @@ import pymupdf
 # saves a tool result longer than about 50,000 characters to a file instead of passing it on,
 # and a model with only these tools cannot read that file.
 TEXT_LIMIT = 20_000
+# The longer side of the picture doc_page shows, in pixels: Anthropic's long-edge limit for most
+# models, and below Claude Code's 2,000. A book's whole page comes out at about 135 to 220 dpi, a
+# scan's figurines legible; a model's API may scale it down further by its own rules, to about
+# 900 by 1,340 for most models, and a box shows small print larger.
+PAGE_PIXELS = 1568
+# The most doc_page enlarges a small part of a page, in dots per inch.
+MOST_DPI = 300
 
 
 def doc_info(path: str) -> dict[str, Any]:
@@ -41,13 +49,15 @@ def doc_text(
     wherever the same picture appears in the book. Some books print the pieces in their moves as
     pictures, which have no letter in the text: give a move printed as
     "2 [picture 1: 0ebed3] c3" to validate_moves and build_pgn as "2 [0ebed3]c3", and they read
-    which piece the picture is from the moves. Do not work out a picture's piece yourself, from
-    its image or otherwise. In an EPUB, an empty line comes before each line that begins a
-    paragraph, a heading or an item of a list, as the book's markup marks them, the page's first
-    line included: a page whose text does not start with an empty line goes on with the
-    paragraph the page before ends, and a line break with no empty line stays within its
-    paragraph. One call gives at most 20,000 characters of text, or one longer page: a longer
-    range is cut after the last whole page that fits, and next_page says where to continue.
+    which piece the picture is from the moves. Do not work out the piece of a picture inside a
+    move yourself, from its image or otherwise. In an EPUB, an empty line comes before each line
+    that begins a paragraph, a heading or an item of a list, as the book's markup marks them, the
+    page's first line included: a page whose text does not start with an empty line goes on with
+    the paragraph the page before ends, and a line break with no empty line stays within its
+    paragraph. A scanned page's text, where it has any, is a machine reading that may differ
+    from the page: doc_page shows the page as printed. One call gives at most 20,000 characters
+    of text, or one longer page: a longer range is cut after the last whole page that fits, and
+    next_page says where to continue.
 
     Returns pages, each with its page number, its section (the table-of-contents entries it falls
     under, outermost first) and its text; and next_page, the first page of the range not given,
@@ -132,6 +142,46 @@ def doc_images(path: str, page: int, out_dir: str) -> dict[str, Any]:
         return {"page": page, "section": _section(doc.get_toc(), page), "images": images}
 
 
+def doc_page(path: str, page: int, out_dir: str, box: list[float] | None = None) -> dict[str, Any]:
+    """Show a page as it is printed, or a part of it, as a picture to look at and to give
+    read_diagram. Use it where the page shows what doc_text does not: a scanned page, whose text
+    is missing or is a machine reading that can garble moves and figurines, and a diagram that
+    doc_images does not extract, such as one set in a chess font. Pages count from 1, as doc_text
+    numbers them.
+
+    box, optional: the part of the page to show, as [x0, y0, x1, y1] in points, the units of the
+    boxes doc_search and doc_images give, to see small print larger. A box past the page's edges
+    is cut to them. To read one diagram of a page that holds several, give read_diagram a box in
+    this picture's pixels around it, or show the diagram's part of the page and give read_diagram
+    that picture whole, as you must on a rotated page, whose picture is drawn turned.
+
+    Returns the picture itself, and page; its section; box, the part shown, in points; and path,
+    width and height, the picture as read_diagram takes it, whose box is in these pixels.
+    """
+    folder = Path(out_dir).resolve()
+    folder.mkdir(parents=True, exist_ok=True)
+    with pymupdf.open(path) as doc:
+        shown = _page(doc, page)
+        # doc_search and doc_images give boxes on the page as it lies unrotated, and a rotated
+        # page is drawn turned: a box is taken in the first and turned with the page to draw.
+        bounds = shown.rect * shown.derotation_matrix
+        part = bounds if box is None else _part(box, bounds, page)
+        clip = part * shown.rotation_matrix
+        zoom = min(PAGE_PIXELS / max(clip.width, clip.height), MOST_DPI / 72)
+        picture = shown.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), clip=clip, alpha=False)
+        corners = "" if box is None else "-" + "-".join(str(round(value)) for value in part)
+        file = folder / f"page{page}-shown{corners}.png"
+        picture.save(file)
+        return {
+            "page": page,
+            "section": _section(doc.get_toc(), page),
+            "box": [round(value, 1) for value in part],
+            "path": str(file),
+            "width": picture.width,
+            "height": picture.height,
+        }
+
+
 def page_text(page: pymupdf.Page) -> str:
     """The page's text in reading order, with each picture marked where it sits, by its number on
     the page and a digest of its bytes, the same wherever the same picture appears. A picture
@@ -187,6 +237,23 @@ def _page(doc: pymupdf.Document, number: int) -> pymupdf.Page:
     if not 1 <= number <= doc.page_count:
         raise ValueError(f"no page {number}: pages run from 1 to {doc.page_count}")
     return doc[number - 1]
+
+
+def _part(box: list[float], page: pymupdf.Rect, number: int) -> pymupdf.Rect:
+    """The part of the page that box names, cut to the page's edges; ValueError for a box that
+    is not four numbers, that runs backwards or that lies outside the page."""
+    if len(box) != 4 or not all(math.isfinite(value) for value in box):
+        raise ValueError(f"box must be [x0, y0, x1, y1], four numbers, not {box}")
+    x0, y0, x1, y1 = box
+    if x0 >= x1 or y0 >= y1:
+        raise ValueError(f"box {box} runs backwards: give [x0, y0, x1, y1] with x0 < x1, y0 < y1")
+    part = pymupdf.Rect(box) & page
+    if part.is_empty:
+        raise ValueError(
+            f"box {box} lies outside page {number}, which is {page.width:g} by {page.height:g} "
+            "points"
+        )
+    return part
 
 
 def _section(toc: list[list[Any]], number: int) -> list[str]:

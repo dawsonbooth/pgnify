@@ -1,5 +1,6 @@
 """Tests of the MCP server through the SDK's in-process client."""
 
+import base64
 import json
 import shutil
 from pathlib import Path
@@ -7,7 +8,7 @@ from typing import Any
 
 import pytest
 from mcp import Client
-from mcp.types import CallToolResult, GetPromptResult, TextContent, Tool
+from mcp.types import CallToolResult, GetPromptResult, ImageContent, TextContent, Tool
 from support import EXERCISES_PAGE, ONE_GAME, PRIMER_PAGES, RUY, call_tools, in_session, move_specs
 
 from pgnify import instructions
@@ -54,6 +55,7 @@ def test_the_server_serves_the_document_diagram_chess_and_output_tools(
         "check_pgn",
         "doc_images",
         "doc_info",
+        "doc_page",
         "doc_search",
         "doc_text",
         "read_diagram",
@@ -188,7 +190,49 @@ def test_read_diagram_refuses_a_picture_doc_images_did_not_extract(
 ) -> None:
     result = _call(primer, tmp_path, "read_diagram", {"image_path": picture})
     assert result.is_error
-    assert "image_path must be a picture doc_images extracted" in _text(result)
+    assert "image_path must be a picture doc_images extracted or doc_page showed" in _text(result)
+
+
+def test_doc_page_gives_the_model_the_picture_itself_and_its_path_in_the_book_folder(
+    primer: Path, tmp_path: Path
+) -> None:
+    result = _call(primer, tmp_path, "doc_page", {"page": EXERCISES_PAGE})
+    assert not result.is_error
+    # The blocks alone, which every client passes on: no structured content to stand in for them.
+    assert result.structured_content is None
+    text, picture = result.content
+    assert isinstance(text, TextContent) and isinstance(picture, ImageContent)
+    shown = json.loads(text.text)
+    assert shown["page"] == EXERCISES_PAGE
+    assert shown["path"].startswith(".pgnify/books/pocket-primer-")
+    assert picture.mime_type == "image/png"
+    assert base64.b64decode(picture.data) == (tmp_path / shown["path"]).read_bytes()
+
+
+def test_doc_page_logs_the_part_shown_and_the_picture_path_not_the_picture(
+    primer: Path, tmp_path: Path
+) -> None:
+    box = [40, 60, 360, 300]
+    result = _call(primer, tmp_path, "doc_page", {"page": EXERCISES_PAGE, "box": box})
+    text, _ = result.content
+    assert isinstance(text, TextContent)
+    (entry,) = [
+        json.loads(line)
+        for line in (tmp_path / ".pgnify" / "log.jsonl").read_text().splitlines()
+        if json.loads(line)["tool"] == "doc_page"
+    ]
+    assert entry["arguments"] == {"page": EXERCISES_PAGE, "box": box}
+    shown = json.loads(text.text)
+    kept = ("page", "box", "path", "width", "height")
+    assert entry["result"] == {key: shown[key] for key in kept}
+
+
+def test_doc_page_refuses_a_page_the_book_lacks_with_its_reason(
+    primer: Path, tmp_path: Path
+) -> None:
+    result = _call(primer, tmp_path, "doc_page", {"page": PRIMER_PAGES + 1})
+    assert result.is_error
+    assert f"no page {PRIMER_PAGES + 1}: pages run from 1 to {PRIMER_PAGES}" in _text(result)
 
 
 def test_a_tool_error_reaches_the_model_with_its_reason(primer: Path, tmp_path: Path) -> None:

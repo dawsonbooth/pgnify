@@ -94,7 +94,7 @@ In the `--out` folder:
 
 - `NAME.pgn`: the games. Unless the assistant gives another name, NAME is the book's.
 - `NAME.notes.md`, when the assistant gave notes: the model's own account of what it could not resolve, what it left out and the conventions it chose.
-- `.pgnify/`: pgnify's working folder. It holds a log of every tool call and, in a folder for each book, the pictures the server extracted, the games it saved and the pieces it read the book's figurines as.
+- `.pgnify/`: pgnify's working folder. It holds a log of every tool call and, in a folder for each book, the pictures the server extracted, the pages it showed, the games it saved and the pieces it read the book's figurines as.
 
 ## Check the result
 
@@ -125,7 +125,7 @@ For a game's position, the report keeps three cases apart:
 - **A diagram that is no position, as the book prints it**: a representation limitation, where a reading of the book's picture backs it. Viewers open its game, but without the diagram.
 - **A position the conversion got wrong**: a verified problem when its FEN tag is no position and no reading of the book backs it, and otherwise a possible issue, such as a Diagram tag that no reading backs, a diagram of the book that no game reaches, or a game that starts from a diagram read with doubts.
 
-With `--coverage`, the report also lists **possible omissions**: the book's text, on every page or on the pages you name, that no comment of its PGN files holds word for word, in runs of 10 words or more, each with its pages and an excerpt. Name the pages of the part you asked for, as `doc_text` numbers them, so that a chapter's conversion is not held to the rest of the book. The list shows textual coverage only: words a comment holds may still be at the wrong move, and words left out may have been left out on purpose, such as the publisher's pages. Shorter runs, mostly headings, captions and labels, and text the book repeats, such as navigation labels, are counted, not listed. A passage the book gives twice and the comments once is listed at both places, since nothing tells which one they keep. Other parts of the book printed on the same pages show up too, and so do a scan's misreadings.
+With `--coverage`, the report also lists **possible omissions**: the book's text, on every page or on the pages you name, that no comment of its PGN files holds word for word, in runs of 10 words or more, each with its pages and an excerpt. Name the pages of the part you asked for, as `doc_text` numbers them, so that a chapter's conversion is not held to the rest of the book. The list shows textual coverage only: words a comment holds may still be at the wrong move, and words left out may have been left out on purpose, such as the publisher's pages. Shorter runs, mostly headings, captions and labels, and text the book repeats, such as navigation labels, are counted, not listed. A passage the book gives twice and the comments once is listed at both places, since nothing tells which one they keep. Other parts of the book printed on the same pages show up too, and so do a scan's misreadings. A page without text, such as a scanned page without a text layer, gives nothing to compare: the report names it as not assessed, neither held nor missing.
 
 A report without verified problems does not mean the conversion is complete or faithful. Without a reference PGN to compare with, pgnify cannot tell whether every game, exercise, variation or passage of the book was found; it reports only what it can check. The assistant's notes prove nothing either way: they can say nothing is missing when something is. Compare the PGN with the book where it matters.
 
@@ -137,11 +137,11 @@ pgnify checks every path the assistant gives it, but it is not a sandbox:
 
 - **What pgnify reads**: only the PDF and EPUB files at `--books`, in that folder and its subfolders. It skips hidden files and folders, and any link that leads outside the folder, to a hidden file, or to anything but a PDF or EPUB. The assistant names a book by its path within the folder, never by an absolute path.
 - **What it writes**: only into `--out`: PGN and notes files under plain file names, and its working folder `.pgnify/`. It never writes through a link or over a notes file it didn't write. It replaces a PGN file only if it wrote that file in the same session from the same book, or if the assistant asks it to.
-- **Books kept separate**: each book's saved games, extracted pictures and figurine readings go in a folder of their own, so two books served together never share them.
+- **Books kept separate**: each book's saved games, pictures and figurine readings go in a folder of their own, so two books served together never share them.
 - **Paths in errors**: the tools' error messages show `<books>`, `<out>` and `~` in place of your folders' paths.
 - **Network**: the server makes no network connections. `pgnify setup` downloads the weights from GitHub only when you run it without `--from`.
 - **Your rights**: the server and its diagram reader run as you, so a flaw in pgnify, or in a library it uses to read a book, could read or change any file you can. Point `--books` at a folder that holds only books, point `--out` at a folder for pgnify alone, and give it only files you would open in any other reader.
-- **What your assistant sees**: whatever the tools return goes to your assistant, and through it to its model provider: the text of the pages it reads and the lines its searches find. pgnify's tools return no pictures, only the positions the diagram reader reads from them, though an assistant with file tools could open the pictures pgnify extracts into `--out`.
+- **What your assistant sees**: whatever the tools return goes to your assistant, and through it to its model provider: the text of the pages it reads, the lines its searches find, and the pictures of the pages `doc_page` shows it, which it asks for to read a scanned page or a diagram set in a chess font. `doc_images` returns no pictures, only their paths, though an assistant with file tools could open the pictures pgnify saves into `--out`.
 
 ## Books and copyright
 

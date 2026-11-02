@@ -11,6 +11,7 @@ from support import FORK, ROOT, png
 
 from pgnify.chess_tools import render_board
 from pgnify.diagram_tools import problems, read_diagram
+from pgnify.doc_tools import doc_page
 
 SKEWER = "6k1/5ppp/8/8/8/8/1Q3PPP/6K1 w - - 0 1"
 
@@ -63,6 +64,26 @@ def test_read_diagram_reads_each_of_two_boards_by_its_box_and_locates_it_in_the_
     reading = read_diagram(str(pair), [410, 0, 820, 400])
     assert reading["placement"] == SKEWER.split()[0]
     assert reading["board"][0] > 410
+
+
+@pytest.mark.live
+def test_read_diagram_reads_each_board_of_a_page_doc_page_showed_by_its_box(tmp_path: Path) -> None:
+    left, right = tmp_path / "left.png", tmp_path / "right.png"
+    render_board(FORK, left)
+    render_board(SKEWER, right)
+    doc = pymupdf.open()
+    page = doc.new_page(width=600, height=400)
+    page.insert_text((40, 40), "Two diagrams side by side", fontsize=12)
+    page.insert_image(pymupdf.Rect(40, 60, 280, 300), filename=str(left))
+    page.insert_image(pymupdf.Rect(320, 60, 560, 300), filename=str(right))
+    book = tmp_path / "pair.pdf"
+    doc.save(book)
+    shown = doc_page(str(book), 1, str(tmp_path / "shown"))
+    # A box in the page's points, as doc_search gives them, in the picture's pixels.
+    scale = shown["width"] / 600
+    for (x0, x1), board in (((30, 290), FORK), ((310, 570), SKEWER)):
+        box = [x0 * scale, 50 * scale, x1 * scale, 310 * scale]
+        assert read_diagram(shown["path"], box)["placement"] == board.split()[0]
 
 
 @pytest.mark.live

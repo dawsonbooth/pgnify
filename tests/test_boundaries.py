@@ -8,6 +8,7 @@ from support import move_specs
 
 from pgnify.books import Book, BooksLocation
 from pgnify.chess_tools import build_pgn, read_figurines
+from pgnify.doc_tools import doc_page
 from pgnify.outputs import Outputs
 
 
@@ -201,6 +202,30 @@ def test_a_picture_is_taken_only_by_the_path_doc_images_gave(
         str(outputs.folder / given),
         f"./{given}",
     ):
+        with pytest.raises(ValueError, match="by the path it gave"):
+            outputs.picture(path)
+
+
+def test_a_page_doc_page_showed_is_taken_only_by_the_path_it_gave(
+    books_folder: Path, outputs: Outputs
+) -> None:
+    books = BooksLocation(books_folder)
+    shown = {}
+    for name in ("primer.epub", "openings/Two Pages.PDF"):
+        book = books.get(name)
+        picture = doc_page(str(book.path), 1, str(outputs.book_folder(book).images))["path"]
+        shown[name] = Path(picture).relative_to(outputs.folder).as_posix()
+    for given in shown.values():
+        assert outputs.picture(given) == outputs.folder / given
+    first, second = shown.values()
+    # A copy of a shown page where saved games go: refused for where it is, not for being missing.
+    elsewhere = second.replace("/images/", "/games/")
+    (outputs.folder / elsewhere).parent.mkdir(parents=True, exist_ok=True)
+    (outputs.folder / elsewhere).write_bytes((outputs.folder / second).read_bytes())
+    climbing = first.replace(
+        "/images/", "/images/../../" + Path(second).parts[2] + "/images/"
+    ).replace(Path(first).name, Path(second).name)
+    for path in (str(outputs.folder / second), f"./{second}", elsewhere, climbing):
         with pytest.raises(ValueError, match="by the path it gave"):
             outputs.picture(path)
 

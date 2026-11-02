@@ -27,15 +27,16 @@ TIMEOUT = 600
 
 
 def read_diagram(image_path: str, box: list[float] | None = None) -> dict[str, Any]:
-    """Read where the pieces stand in a picture of a chess diagram that doc_images extracted,
-    given by the path it returned. The diagram reader finds the board and reads each square; the
-    book's text gives whose move it is, castling and en passant. A picture may hold more than one
-    diagram, side by side or one above another, as scanned books may print them; the reader
-    reads one board, so give box to read one diagram of such a picture.
+    """Read where the pieces stand in a picture of a chess diagram that doc_images extracted or
+    doc_page showed, given by the path it returned. The diagram reader finds the board and reads
+    each square; the book's text gives whose move it is, castling and en passant. A picture may
+    hold more than one diagram, side by side or one above another, as a scanned page or a page
+    doc_page shows may; the reader reads one board, so give box to read one diagram of such a
+    picture, around the whole board: a board the box cuts is misread.
 
     box, optional: the part of the picture to read, as [x0, y0, x1, y1] in the picture's pixels,
-    the units of doc_images' width and height. A box past the picture's edges is cut to them,
-    and the board is looked for within it.
+    the units of the width and height doc_images and doc_page give. A box past the picture's
+    edges is cut to them, and the board is looked for within it.
 
     Returns ok; placement, the first field of a FEN, from White's side even when the picture
     shows the board from Black's; flipped, whether it does; board, where the board was found, as

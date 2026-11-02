@@ -136,9 +136,15 @@ def report_(
         )
         if book.get("coverage", {}).get("book_found"):
             omissions = book["coverage"]["omissions"]
+            textless = book["coverage"]["textless"]
+            unassessed = (
+                f"; {report.counted(len(textless), 'page')} without text, not assessed"
+                if textless
+                else ""
+            )
             typer.echo(
                 f"{book['book']}: {report.counted(len(omissions), 'possible omission')}, "
-                f"{sum(omission['words'] for omission in omissions):,} words"
+                f"{sum(omission['words'] for omission in omissions):,} words{unassessed}"
             )
     if reported["findings"]:
         typer.echo(f"{report.counted(len(reported['findings']), 'tool error')} outside these files")

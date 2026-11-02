@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pymupdf
 import pytest
-from support import call_tools
+from support import call_tools, png
 from typer.testing import CliRunner
 
 from pgnify.cli import app
@@ -168,3 +168,68 @@ def test_the_command_line_names_the_scope_and_refuses_pages_the_book_lacks(
     refused = runner.invoke(app, ["report", str(out), "--coverage", "2-9"])
     assert refused.exit_code == 2
     assert "within 1 to 3" in refused.output
+
+
+def _with_a_scanned_page(path: Path) -> Path:
+    """A PDF of two pages: the first a text, the second a page that is a picture alone, as a
+    scan without a text layer is."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=900, height=600)
+    page.insert_textbox(pymupdf.Rect(30, 30, 870, 570), PLANS, fontsize=9)
+    doc.new_page(width=900, height=600).insert_image(
+        pymupdf.Rect(0, 0, 900, 600), stream=png(90, 60, 200)
+    )
+    doc.save(path)
+    return path
+
+
+def test_a_page_without_text_is_not_assessed_rather_than_held_or_missing(tmp_path: Path) -> None:
+    book = _with_a_scanned_page(tmp_path / "scan.pdf")
+    found = coverage(book, [PLANS])
+    assert found.textless == [2]
+    assert found.words == found.held == len(PLANS.split())
+    assert found.omissions == []
+    assert coverage(book, [], [1]).textless == []
+
+
+def test_report_names_pages_without_text_as_not_assessed_apart_from_omissions(
+    tmp_path: Path,
+) -> None:
+    book = _with_a_scanned_page(tmp_path / "scan.pdf")
+    out = _converted(book, tmp_path / "out", [PLANS])
+    runner = CliRunner()
+    done = runner.invoke(app, ["report", str(out), "--coverage", "2"])
+    assert done.exit_code == 0, done.output
+    assert "scan.pdf: 0 possible omissions, 0 words; 1 page without text, not assessed" in (
+        done.output
+    )
+    assert json.loads((out / "report.json").read_text())["books"][0]["coverage"]["textless"] == [2]
+    text = (out / "report.md").read_text()
+    assert "**Not assessed:** the pages without text, p. 2, 1 of the 1 asked for." in text
+    assert "Not assessed: none of these pages has text." in text
+    assert "None found" not in text.split("### Possible omissions")[1]
+    assert "The comments hold 0 of the 0 words" not in text
+
+
+def test_report_assesses_the_pages_with_text_beside_those_without(tmp_path: Path) -> None:
+    book = _with_a_scanned_page(tmp_path / "scan.pdf")
+    out = _converted(book, tmp_path / "out", [PLANS])
+    report(out, coverage="1-2")
+    text = (out / "report.md").read_text()
+    assert f"The comments hold {len(PLANS.split())} of the {len(PLANS.split())} words" in text
+    assert "**Not assessed:** the pages without text, p. 2, 1 of the 2 asked for." in text
+    assert "None found on the pages with text." in text
+
+
+def test_a_page_without_text_stays_unassessed_after_a_page_that_ends_with_a_hyphen(
+    tmp_path: Path,
+) -> None:
+    doc = pymupdf.open()
+    page = doc.new_page(width=900, height=600)
+    page.insert_textbox(pymupdf.Rect(30, 30, 870, 570), f"{PLANS} over-", fontsize=9)
+    doc.new_page(width=900, height=600).insert_image(
+        pymupdf.Rect(0, 0, 900, 600), stream=png(90, 60, 200)
+    )
+    book = tmp_path / "hyphen-then-scan.pdf"
+    doc.save(book)
+    assert coverage(book, [PLANS]).textless == [2]

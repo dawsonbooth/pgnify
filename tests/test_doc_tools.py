@@ -5,7 +5,16 @@ import pymupdf
 import pytest
 from support import EXERCISES_PAGE, PRIMER, PRIMER_PAGES, png, write_epub, write_text_epub
 
-from pgnify.doc_tools import doc_images, doc_info, doc_search, doc_text, page_lines
+from pgnify.doc_tools import (
+    MOST_DPI,
+    PAGE_PIXELS,
+    doc_images,
+    doc_info,
+    doc_page,
+    doc_search,
+    doc_text,
+    page_lines,
+)
 
 PICTURES = PRIMER / "OEBPS" / "images"
 RETI = {"level": 2, "title": "1.2 The Réti Manoeuvre", "page": 8}
@@ -267,3 +276,106 @@ def test_doc_images_gives_a_diagram_sized_by_its_height_whole(
     _, top, _, bottom = picture["box"]
     assert (picture["width"], picture["height"]) == (345, 293)
     assert bottom - top > 250  # laid out whole, not squeezed to a few points
+
+
+def test_doc_page_shows_a_whole_page_with_its_longer_side_at_the_api_limit(
+    two_pages: Path, tmp_path: Path
+) -> None:
+    shown = doc_page(str(two_pages), 1, str(tmp_path))
+    assert shown["page"] == 1
+    assert shown["box"] == [0.0, 0.0, 400.0, 600.0]
+    # PyMuPDF rounds the page's edges outward to whole pixels.
+    assert shown["height"] == PAGE_PIXELS
+    assert abs(shown["width"] - 400 * PAGE_PIXELS / 600) < 1
+    picture = pymupdf.Pixmap(shown["path"])
+    assert (picture.width, picture.height) == (shown["width"], shown["height"])
+
+
+def test_doc_page_numbers_pages_and_names_sections_as_doc_text_does(
+    two_pages: Path, tmp_path: Path
+) -> None:
+    for page in (1, 2):
+        (text,) = doc_text(str(two_pages), page)["pages"]
+        shown = doc_page(str(two_pages), page, str(tmp_path))
+        assert (shown["page"], shown["section"]) == (text["page"], text["section"])
+
+
+def test_doc_page_shows_the_page_as_printed_where_a_box_puts_it(
+    two_pages: Path, tmp_path: Path
+) -> None:
+    # The first page's picture is grey 128 from (40, 120) to (200, 280), on a white page.
+    whole = pymupdf.Pixmap(doc_page(str(two_pages), 1, str(tmp_path))["path"])
+    scale = PAGE_PIXELS / 600
+    assert whole.pixel(round(120 * scale), round(200 * scale)) == (128, 128, 128)
+    assert whole.pixel(round(300 * scale), round(500 * scale)) == (255, 255, 255)
+    shown = doc_page(str(two_pages), 1, str(tmp_path), [40, 120, 200, 280])
+    part = pymupdf.Pixmap(shown["path"])
+    corners = [(1, 1), (part.width - 2, 1), (1, part.height - 2), (part.width - 2, part.height - 2)]
+    assert {part.pixel(x, y) for x, y in corners} == {(128, 128, 128)}
+
+
+def test_doc_page_enlarges_a_small_part_to_300_dpi_at_most_and_cuts_a_box_to_the_page(
+    two_pages: Path, tmp_path: Path
+) -> None:
+    shown = doc_page(str(two_pages), 1, str(tmp_path), [40, 120, 200, 280])
+    assert shown["box"] == [40.0, 120.0, 200.0, 280.0]
+    assert all(abs(shown[side] - 160 * MOST_DPI / 72) < 2 for side in ("width", "height"))
+    past = doc_page(str(two_pages), 1, str(tmp_path), [-50, -50, 100, 100])
+    assert past["box"] == [0.0, 0.0, 100.0, 100.0]
+    assert Path(shown["path"]).name != Path(past["path"]).name
+
+
+def test_doc_page_shows_an_epub_page_as_its_layout_has_it(primer: Path, tmp_path: Path) -> None:
+    shown = doc_page(str(primer), EXERCISES_PAGE, str(tmp_path))
+    assert shown["box"] == [0.0, 0.0, *map(float, EPUB_PAGE)]
+    assert shown["height"] == PAGE_PIXELS
+    # The page's first diagram, where doc_images places it, is drawn there.
+    x0, y0, x1, y1 = doc_images(str(primer), EXERCISES_PAGE, str(tmp_path))["images"][0]["box"]
+    part = doc_page(str(primer), EXERCISES_PAGE, str(tmp_path), [x0, y0, x1, y1])
+    picture = pymupdf.Pixmap(part["path"])
+    pixels = [
+        picture.pixel(x, y) for x in range(0, picture.width, 4) for y in range(0, picture.height, 4)
+    ]
+    assert sum(min(colour) < 128 for colour in pixels) > len(pixels) // 20
+
+
+@pytest.mark.parametrize(
+    ("page", "box", "message"),
+    [
+        (0, None, "no page 0: pages run from 1 to 2"),
+        (3, None, "no page 3: pages run from 1 to 2"),
+        (1, [40, 120, 200], "box must be"),
+        (1, [200, 280, 40, 120], "runs backwards"),
+        (1, [40, 120, 40, 280], "runs backwards"),
+        (1, [500, 700, 600, 800], "lies outside page 1, which is 400 by 600 points"),
+        (1, [float("nan"), 0, 100, 100], "four numbers"),
+        (1, [0, 0, float("inf"), 100], "four numbers"),
+    ],
+)
+def test_doc_page_refuses_a_page_the_book_lacks_and_a_box_that_shows_nothing(
+    two_pages: Path, tmp_path: Path, page: int, box: list[float] | None, message: str
+) -> None:
+    with pytest.raises(ValueError, match=re.escape(message)):
+        doc_page(str(two_pages), page, str(tmp_path), box)
+    assert not list(tmp_path.rglob("*.png"))
+
+
+def test_doc_page_takes_a_box_as_doc_search_gives_it_on_a_rotated_page(tmp_path: Path) -> None:
+    doc = pymupdf.open()
+    page = doc.new_page(width=400, height=600)
+    page.insert_text((40, 60), "Knight to f3", fontsize=14)
+    page.set_rotation(90)
+    book = tmp_path / "rotated.pdf"
+    doc.save(book)
+    (hit,) = doc_search(str(book), "Knight")["hits"]
+    x0, y0, x1, y1 = hit["box"]
+    shown = doc_page(str(book), 1, str(tmp_path), [x0 - 2, y0 - 2, x1 + 2, y1 + 2])
+    assert shown["box"] == [round(v, 1) for v in (x0 - 2, y0 - 2, x1 + 2, y1 + 2)]
+    part = pymupdf.Pixmap(shown["path"])
+    pixels = [part.pixel(x, y) for x in range(part.width) for y in range(part.height)]
+    # The word, turned with the page: a fair share of the part is ink.
+    assert sum(min(colour) < 128 for colour in pixels) > len(pixels) // 20
+    whole = doc_page(str(book), 1, str(tmp_path))
+    assert whole["box"] == [0.0, 0.0, 400.0, 600.0]
+    # Drawn turned, as a reader sees it: its longer side across.
+    assert whole["width"] == PAGE_PIXELS > whole["height"]
