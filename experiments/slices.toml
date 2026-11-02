@@ -39,6 +39,12 @@ source = "winning-chess-strategies"
 # Chapter Four, Understanding Where the Pieces Go, as PyMuPDF lays out the EPUB.
 pages = [[46, 103]]
 
+[cuts.structures-smoke]
+source = "chess-structures"
+# The opening of Chapter 1, The Isolani, and the start of its first game: the book's pages 12
+# and 13, a scan whose text Acrobat's ClearScan replaced.
+pages = [[13, 14]]
+
 # The part each slice's prompt names, in the book's own terms, and its truth.
 
 [slices.workbook-rook-forks]
@@ -101,3 +107,12 @@ truth = "data/local/truth/workbook-rook-forks.pgn"
 cut = "wcs-chapter-four"
 part = "Chapter Four, Understanding Where the Pieces Go"
 client_ceiling_usd = 15.0
+
+# A smoke run of pgnify's page picture tool, doc_page, on a scanned PDF whose text layer garbles
+# its figurines: the chapter's introduction, its plans and its structure diagram, which has no
+# kings, and the first game to the end of page 14, with its variations and two diagrams. A
+# real-client session only; data/local/truth/structures-smoke.md says how it is checked.
+[slices.structures-smoke]
+cut = "structures-smoke"
+part = "pages 13 and 14, as pgnify's tools number them: the opening of Chapter 1, The Isolani, and its first game as far as page 14 goes"
+truth = "data/local/truth/structures-smoke.pgn"
