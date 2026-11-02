@@ -13,10 +13,10 @@ import pymupdf
 # saves a tool result longer than about 50,000 characters to a file instead of passing it on,
 # and a model with only these tools cannot read that file.
 TEXT_LIMIT = 20_000
-# The longer side of the picture doc_page shows, in pixels: Anthropic's long-edge limit for most
-# models, and below Claude Code's 2,000. A book's whole page comes out at about 135 to 220 dpi, a
-# scan's figurines legible; a model's API may scale it down further by its own rules, to about
-# 900 by 1,340 for most models, and a box shows small print larger.
+# The longer side of the picture doc_page shows, in pixels: Anthropic's long-edge limit for older
+# models, which scale a page down further, to about 900 by 1,340, and below Claude Code's 2,000;
+# newer models, Sonnet 5.5 among them, take it whole. A book's whole page comes out at about 135
+# to 220 dpi, a scan's figurines legible, and a box shows small print larger.
 PAGE_PIXELS = 1568
 # The most doc_page enlarges a small part of a page, in dots per inch.
 MOST_DPI = 300
