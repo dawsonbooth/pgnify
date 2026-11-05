@@ -55,6 +55,13 @@ source = "chess-structures"
 # Chapter 2, Hanging Pawns, and Chapter 3, Caro-Kann Formation: the book's pages 36 to 68.
 pages = [[37, 69]]
 
+[cuts.woodpecker]
+source = "woodpecker-method"
+# The Summary of Tactical Motifs, Chapter 1's opening page with Easy Exercises 1 to 12, and
+# Chapter 4's opening page with their solutions: the book's pages 21 to 25, 31 to 33 and 223 to
+# 225, a born-digital PDF whose diagrams are set in a chess font.
+pages = [[22, 26], [32, 34], [224, 226]]
+
 # The part each slice's prompt names, in the book's own terms, and its truth.
 
 [slices.workbook-rook-forks]
@@ -149,3 +156,15 @@ cut = "structures-37-69"
 part = "pages 37 to 69, as pgnify's tools number them: Chapter 2, Hanging Pawns, and Chapter 3, Caro-Kann Formation"
 truth = "data/local/truth/structures-37-69.pgn"
 client_ceiling_usd = 15.0
+
+# The validation of PDFs whose diagrams are set in a chess font: a born-digital Quality Chess book
+# whose figurines and marks come through its text layer as its fonts' own codes, with a key to
+# symbols on page 5, six diagrams to a page, and exercises whose solutions are printed about 190
+# pages later. Its request names the part alone. A real-client session only;
+# data/local/truth/woodpecker.md says how it is checked. The safety ceiling on cost guards against
+# runaway work and is no target.
+[slices.woodpecker]
+cut = "woodpecker"
+part = "pages 22 to 26, 32 to 34 and 224 to 226, as pgnify's tools number them: the Summary of Tactical Motifs, the opening of Chapter 1 with Easy Exercises 1 to 12, and those twelve exercises' solutions in Chapter 4"
+truth = "data/local/truth/woodpecker.pgn"
+client_ceiling_usd = 5.0
