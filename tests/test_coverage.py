@@ -6,12 +6,12 @@ from pathlib import Path
 
 import pymupdf
 import pytest
-from support import call_tools, png
+from support import born_digital, call_tools, clearscan, png
 from typer.testing import CliRunner
 
 from pgnify.cli import app
 from pgnify.coverage import coverage, scope_pages
-from pgnify.report import report
+from pgnify.report import OCR_DERIVED, report
 
 PLANS = (
     "Strategy is the purposeful pursuit of a simple goal, to gain an advantage of some sort "
@@ -233,3 +233,55 @@ def test_a_page_without_text_stays_unassessed_after_a_page_that_ends_with_a_hyph
     book = tmp_path / "hyphen-then-scan.pdf"
     doc.save(book)
     assert coverage(book, [PLANS]).textless == [2]
+
+
+@pytest.mark.parametrize(
+    ("make", "page", "basis"),
+    [(clearscan, 2, OCR_DERIVED), (born_digital, 3, None)],
+    ids=["clearscan", "born-digital"],
+)
+def test_possible_omissions_are_all_listed_and_labelled_by_where_their_pages_text_comes_from(
+    tmp_path: Path, make, page: int, basis: str | None
+) -> None:
+    out = _converted(make(tmp_path, [PLANS, ROOKS]), tmp_path / "out", [PLANS])
+    (omission,) = report(out, coverage="all")["books"][0]["coverage"]["omissions"]
+    assert (omission["first_page"], omission["basis"]) == (page, basis)
+    text = (out / "report.md").read_text()
+    lower = "### Possible omissions on pages whose text appears OCR-derived: lower confidence"
+    assert (lower in text) is (basis is not None)
+    assert f"- p. {page}, " in text
+
+
+def test_the_command_line_counts_lower_confidence_findings_apart(tmp_path: Path) -> None:
+    book = clearscan(tmp_path, [PLANS, ROOKS])
+    out = _converted(book, tmp_path / "out", [PLANS, KNIGHTS])
+    done = CliRunner().invoke(app, ["report", str(out), "--coverage", "all"])
+    assert done.exit_code == 0, done.output
+    assert (
+        "plans.pgn: 2 games, 0 verified problems, 0 possible issues, and 1 of lower confidence, "
+        "comment text against a text layer that appears OCR-derived"
+    ) in done.output
+    assert (
+        "clearscan.pdf: 1 possible omission (1 of lower confidence, on pages whose text appears "
+        "OCR-derived), 23 words"
+    ) in done.output
+
+
+def test_on_a_mostly_scanned_book_only_the_scanned_pages_omissions_are_of_lower_confidence(
+    tmp_path: Path,
+) -> None:
+    # Three pages of text over a picture of the page, then a typeset page, with no tool named.
+    doc = pymupdf.open()
+    for text in (PLANS, KNIGHTS, RULE):
+        page = doc.new_page(width=400, height=600)
+        page.insert_image(page.rect, stream=png(40, 60, 230))
+        page.insert_textbox(pymupdf.Rect(40, 60, 360, 560), text, fontsize=11)
+    doc.new_page(width=400, height=600).insert_textbox(
+        pymupdf.Rect(40, 60, 360, 560), ROOKS, fontsize=11
+    )
+    book = tmp_path / "mostly-scanned.pdf"
+    doc.save(book)
+    # The comments hold pages 1 and 3, so pages 2 and 4 are each an omission of its own.
+    out = _converted(book, tmp_path / "out", [PLANS, RULE])
+    omissions = report(out, coverage="all")["books"][0]["coverage"]["omissions"]
+    assert {(o["first_page"], o["basis"]) for o in omissions} == {(2, OCR_DERIVED), (4, None)}

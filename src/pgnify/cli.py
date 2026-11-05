@@ -123,11 +123,17 @@ def report_(
         problems += kinds.count("problem")
         limitations = kinds.count("limitation")
         limited = f"{report.counted(limitations, 'representation limitation')}, "
+        lower = sum(1 for finding in output["findings"] if finding.get("basis"))
+        lowered = (
+            f", and {lower} of lower confidence, comment text against {report.OCR_DERIVED}"
+            if lower
+            else ""
+        )
         typer.echo(
             f"{output['file']}: {report.counted(len(output['games']), 'game')}, "
             f"{report.counted(kinds.count('problem'), 'verified problem')}, "
             f"{limited if limitations else ''}"
-            f"{report.counted(kinds.count('issue'), 'possible issue')}"
+            f"{report.counted(kinds.count('issue') - lower, 'possible issue')}{lowered}"
         )
     for book in reported["books"]:
         typer.echo(
@@ -142,8 +148,14 @@ def report_(
                 if textless
                 else ""
             )
+            lower = sum(1 for omission in omissions if omission.get("basis"))
+            lowered = (
+                f" ({lower} of lower confidence, on pages whose text appears OCR-derived)"
+                if lower
+                else ""
+            )
             typer.echo(
-                f"{book['book']}: {report.counted(len(omissions), 'possible omission')}, "
+                f"{book['book']}: {report.counted(len(omissions), 'possible omission')}{lowered}, "
                 f"{sum(omission['words'] for omission in omissions):,} words{unassessed}"
             )
     if reported["findings"]:

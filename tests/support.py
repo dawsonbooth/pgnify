@@ -102,3 +102,63 @@ def call_tools(
         return [await client.call_tool(name, arguments) for name, arguments in calls]
 
     return in_session(books, out, call, spanned)
+
+
+# The four kinds of PDF pgnify reads, made small: a scan whose text ClearScan replaced, a scan with
+# an invisible OCR layer, a scan of pictures alone, and a typeset book with a cover.
+SENTENCE = "The isolated pawn gives White open lines for an attack on the king."
+
+
+def clearscan(folder: Path, texts: list[str] | None = None) -> Path:
+    """A scan whose text Acrobat's ClearScan replaced: visible text, a page for each of the
+    texts, no picture of the page, and a producer that names the tool."""
+    doc = pymupdf.open()
+    for text in texts or [SENTENCE] * 3:
+        doc.new_page(width=400, height=600).insert_textbox(
+            pymupdf.Rect(40, 60, 360, 560), text, fontsize=11
+        )
+    doc.set_metadata({"producer": "Adobe Acrobat Pro 11.0.12 Paper Capture Plug-in with ClearScan"})
+    path = folder / "clearscan.pdf"
+    doc.save(path)
+    return path
+
+
+def ocr_scan(folder: Path) -> Path:
+    """A scan with an invisible OCR layer over each page's picture, and no producer named."""
+    doc = pymupdf.open()
+    for _ in range(3):
+        page = doc.new_page(width=400, height=600)
+        page.insert_image(page.rect, stream=png(40, 60, 230))
+        page.insert_text((40, 80), SENTENCE, fontsize=11, render_mode=3)
+    path = folder / "ocr-scan.pdf"
+    doc.save(path)
+    return path
+
+
+def image_only(folder: Path) -> Path:
+    """A scan of pictures alone, with no text layer."""
+    doc = pymupdf.open()
+    for _ in range(3):
+        page = doc.new_page(width=400, height=600)
+        page.insert_image(page.rect, stream=png(40, 60, 230))
+    doc.set_metadata({"producer": "Adobe Acrobat 8.12 Image Conversion Plug-in"})
+    path = folder / "image-only.pdf"
+    doc.save(path)
+    return path
+
+
+def born_digital(folder: Path, texts: list[str] | None = None) -> Path:
+    """A typeset PDF whose first page is a cover, a picture of the whole page, and a page for
+    each of the texts after it."""
+    doc = pymupdf.open()
+    cover = doc.new_page(width=400, height=600)
+    cover.insert_image(cover.rect, stream=png(40, 60, 90))
+    cover.insert_text((40, 80), "The Isolani", fontsize=24)
+    for text in texts or [SENTENCE] * 3:
+        doc.new_page(width=400, height=600).insert_textbox(
+            pymupdf.Rect(40, 60, 360, 560), text, fontsize=11
+        )
+    doc.set_metadata({"producer": "LuaTeX-1.17.0", "creator": "LaTeX with hyperref"})
+    path = folder / "born-digital.pdf"
+    doc.save(path)
+    return path

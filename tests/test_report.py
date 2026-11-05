@@ -4,10 +4,29 @@ from typing import Any
 
 import pymupdf
 import pytest
-from support import EXERCISES_PAGE, ONE_GAME, call_tools, move_specs
+from support import (
+    EXERCISES_PAGE,
+    ONE_GAME,
+    SENTENCE,
+    born_digital,
+    call_tools,
+    clearscan,
+    image_only,
+    move_specs,
+    ocr_scan,
+)
 
 from pgnify.prose import book_prose
-from pgnify.report import CAVEAT, MACHINE_READING, check, report
+from pgnify.report import (
+    CAVEAT,
+    MACHINE_READING,
+    NO_TEXT_LAYER,
+    OCR_DERIVED,
+    as_text,
+    check,
+    check_file,
+    report,
+)
 
 FROM_THE_BOOK = "The king enters the square of the h-pawn just in time and the game is drawn."
 NOT_IN_IT = "White should resign at once because the pawn cannot be stopped by anything."
@@ -270,6 +289,138 @@ def test_report_md_says_nothing_of_text_layers_where_no_book_is_compared(tmp_pat
     (tmp_path / "forks.pgn").write_text('[Result "*"]\n\n1. e4 *\n')
     report(tmp_path)
     assert MACHINE_READING not in (tmp_path / "report.md").read_text()
+
+
+def write_from(book: Path, out: Path, comments: list[str]) -> None:
+    """A PGN file written from the book in one session: a game of 1.e4 for each comment."""
+    names = [f"game{number}" for number in range(len(comments))]
+    calls = [
+        ("build_pgn", {"spec": {"moves": [{"san": "e4", "comment": comment}]}, "name": name})
+        for name, comment in zip(names, comments, strict=True)
+    ]
+    call_tools(book, out, [*calls, ("write_pgn", {"names": names})])
+
+
+@pytest.mark.parametrize(
+    ("make", "basis"),
+    [(clearscan, OCR_DERIVED), (ocr_scan, OCR_DERIVED), (born_digital, None)],
+    ids=["clearscan", "ocr-scan", "born-digital"],
+)
+def test_comment_text_a_text_layer_that_appears_ocr_derived_lacks_is_of_lower_confidence(
+    tmp_path: Path, make, basis: str | None
+) -> None:
+    write_from(make(tmp_path), tmp_path / "out", [SENTENCE, NOT_IN_IT])
+    (output,) = report(tmp_path / "out")["outputs"]
+    lacking = [f for f in output["findings"] if "not word for word" in f["what"]]
+    assert len(lacking) == 1 and "resign" in lacking[0]["what"]
+    assert lacking[0]["basis"] == basis
+    assert output["text_layer"]["machine_read"] is (basis is not None)
+
+
+def test_an_epubs_comment_text_findings_are_ordinary(primer: Path, tmp_path: Path) -> None:
+    write_from(primer, tmp_path, [FROM_THE_BOOK, NOT_IN_IT])
+    (output,) = report(tmp_path)["outputs"]
+    (lacking,) = [f for f in output["findings"] if "not word for word" in f["what"]]
+    assert lacking["basis"] is None
+
+
+def test_report_md_sums_up_lower_confidence_comment_text_apart_from_the_other_issues(
+    tmp_path: Path,
+) -> None:
+    names = [
+        *("Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot"),
+        *("Golf", "Hotel", "India", "Juliet", "Kilo", "Lima"),
+    ]
+    others = [
+        f"In the {name} game White should resign, as the pawn cannot be stopped." for name in names
+    ]
+    write_from(clearscan(tmp_path), tmp_path / "out", others)
+    reported = report(tmp_path / "out")
+    page = (tmp_path / "out" / "report.md").read_text()
+    issues = page.index("### Possible issues, for a person to judge")
+    lower = page.index(
+        "### Comment text against a text layer that appears OCR-derived: lower confidence"
+    )
+    assert issues < lower and "not word for word" not in page[issues:lower]
+    assert "None found, apart from 12 of lower confidence below." in page[issues:lower]
+    assert "Paper Capture Plug-in with ClearScan" in page[lower:]
+    assert (
+        "12 comment passages, in 12 games (1-12), are not word for word in the text"
+        in (page[lower:])
+    )
+    assert page[lower:].count("not word for word in the book") == 10
+    assert "All 12 are in report.json" in page[lower:]
+    (output,) = reported["outputs"]
+    assert sum(f["basis"] == OCR_DERIVED for f in output["findings"]) == 12
+
+
+def test_the_examples_of_lower_confidence_comment_text_come_from_each_game(
+    tmp_path: Path,
+) -> None:
+    # Three games with five passages each: the count is of games, and every game gives one.
+    words = ["Alpha", "Bravo", "Charlie", "Delta", "Echo"]
+    comments = [
+        "\n".join(f"In the {game} {word} line White should resign at once." for word in words)
+        for game in ("first", "second", "third")
+    ]
+    write_from(clearscan(tmp_path), tmp_path / "out", comments)
+    report(tmp_path / "out")
+    page = (tmp_path / "out" / "report.md").read_text()
+    assert "15 comment passages, in 3 games (1-3)," in page
+    for game in (1, 2, 3):
+        assert f"- Game {game}: comment text not word for word" in page
+
+
+def test_comments_are_not_compared_with_a_book_that_has_no_text_layer(tmp_path: Path) -> None:
+    write_from(image_only(tmp_path), tmp_path / "out", [NOT_IN_IT])
+    (output,) = report(tmp_path / "out")["outputs"]
+    assert not [f for f in output["findings"] if "not word for word" in f["what"]]
+    assert output["text_layer"]["pages_with_text"] == 0
+    assert NO_TEXT_LAYER in (tmp_path / "out" / "report.md").read_text()
+
+
+def test_a_verified_problem_against_an_ocr_derived_layer_keeps_its_full_weight(
+    tmp_path: Path,
+) -> None:
+    out = tmp_path / "out"
+    call_tools(
+        clearscan(tmp_path), out, [("write_pgn", {"games": ['[Result "*"]\n\n1. e4 stray *']})]
+    )
+    (output,) = report(out)["outputs"]
+    problems = [f for f in output["findings"] if f["kind"] == "problem"]
+    assert problems and all(f["basis"] is None for f in problems)
+
+
+def test_findings_that_do_not_rest_on_the_text_layer_are_unchanged_by_it(tmp_path: Path) -> None:
+    # A Diagram tag no reading backs, and a position without moves, on an OCR-derived layer.
+    tagged = f'[Diagram "{KNIGHTS_ALONE}"]\n[Result "*"]\n\n*'
+    alone = f'[FEN "{ROOK_ON_A1} w - - 0 1"]\n[SetUp "1"]\n[Result "*"]\n\n*'
+    out = tmp_path / "out"
+    call_tools(clearscan(tmp_path), out, [("write_pgn", {"games": [tagged, alone]})])
+    (output,) = report(out)["outputs"]
+    issues = [f for f in output["findings"] if f["kind"] == "issue"]
+    assert len(issues) == 2 and all(f["basis"] is None for f in issues)
+    page = (out / "report.md").read_text()
+    assert "lower confidence" not in page
+
+
+def test_pgnify_check_gives_lower_confidence_comment_text_apart(tmp_path: Path) -> None:
+    pgn = tmp_path / "games.pgn"
+    pgn.write_text(f'[Result "*"]\n\n1. e4 {{ {NOT_IN_IT} }} *\n')
+    text = as_text(check_file(pgn, clearscan(tmp_path)))
+    assert "- none found, apart from 1 of lower confidence below" in text
+    assert "Comment text against a text layer that appears OCR-derived, lower confidence" in text
+    assert "resign" in text.split("lower confidence")[-1]
+    assert NO_TEXT_LAYER in as_text(check_file(pgn, image_only(tmp_path)))
+
+
+def test_pgnify_check_labels_comment_text_against_an_ocr_derived_layer(tmp_path: Path) -> None:
+    pgn = tmp_path / "games.pgn"
+    pgn.write_text(f'[Result "*"]\n\n1. e4 {{ {NOT_IN_IT} }} *\n')
+    checked = check_file(pgn, clearscan(tmp_path))
+    (lacking,) = [f for f in checked["findings"] if "not word for word" in f["what"]]
+    assert lacking["basis"] == OCR_DERIVED
+    assert checked["text_layer"]["machine_read"]
 
 
 def test_a_report_with_no_notes_says_their_absence_proves_nothing(

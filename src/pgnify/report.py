@@ -2,8 +2,11 @@
 needs fixing, such as an illegal move or text a PGN reader would drop. A representation
 limitation is what PGN cannot hold as the book gives it, kept another way, such as a diagram
 without kings, which no game can start from. A possible issue is an observation for a person to
-judge, such as an uncertain square or a diagram never read. The model's own account, the notes
-it gave write_pgn, is quoted separately and never verified."""
+judge, such as an uncertain square or a diagram never read. A comparison with a book's text
+layer that, by the file's own properties, appears to be a machine reading of scanned pages is a
+possible issue of lower confidence, kept and labelled apart: that evidence says where the text
+comes from, not that it is wrong. The model's own account, the notes it gave write_pgn, is quoted
+separately and never verified."""
 
 import json
 import shutil
@@ -22,6 +25,7 @@ from pgnify.coverage import coverage as book_coverage
 from pgnify.diagram_tools import problems
 from pgnify.outputs import read_notes, read_records
 from pgnify.prose import BookProse, bare, book_prose, passages, sentences, shortened
+from pgnify.text_layer import SCANNED_PAGE, TextLayer, text_layer
 
 CAVEAT = (
     "A report without verified problems does not mean the conversion is complete or faithful. "
@@ -35,12 +39,20 @@ MACHINE_READING = (
     "wherever that reading is wrong, so a comment named here may be right. The printed page "
     "decides."
 )
+# The basis of a comparison with a text layer that appears to be a machine reading, which makes
+# what it finds of lower confidence.
+OCR_DERIVED = "a text layer that appears OCR-derived"
+# Said where a book's file has no text layer at all, so its comments were not compared.
+NO_TEXT_LAYER = (
+    "Comments were not compared with the book's words: its file has no text layer, so whether "
+    "they hold the words its pages print is unknown."
+)
+# The lower-confidence comment-text findings report.md shows as examples; report.json has all.
+EXAMPLES = 10
 # A passage repeated in one game's comments is reported when it has at least this many words.
 MIN_REPEATED_WORDS = 5
 # A picture smaller than this on either side, in pixels, is taken for a figurine, not a diagram.
 MIN_DIAGRAM_SIDE = 64
-# A picture that covers at least this share of its page is taken for a scanned page.
-SCANNED_PAGE = 0.9
 # The words of a finding's quotation, and the characters of a tool's error, that report.md
 # shows.
 QUOTED_WORDS = 14
@@ -62,16 +74,23 @@ class Finding:
     kind: Literal["problem", "limitation", "issue"]
     what: str
     game: int | None = None
+    # What a comparison rests on, where that lowers its confidence; None for any other finding.
+    basis: str | None = None
 
 
 def check(
-    text: str, book: BookProse | None = None, readings: list[dict[str, Any]] | None = None
+    text: str,
+    book: BookProse | None = None,
+    readings: list[dict[str, Any]] | None = None,
+    machine_read: bool = False,
 ) -> dict[str, Any]:
     """Check PGN text of one or more games and, given book, the book's prose from book_prose,
-    compare their comments with it. Given readings, the server's log entries of the diagram
-    reader's readings of the book's pictures, a FEN tag that is no position is a representation
-    limitation where a reading backs it, and a Diagram tag that no reading backs is a possible
-    issue. Returns a summary of each game, and the findings."""
+    compare their comments with it; with machine_read, the book's text layer appears to be a
+    machine reading, and what the comparison finds is of lower confidence. Given readings, the
+    server's log entries of the diagram reader's readings of the book's pictures, a FEN tag that
+    is no position is a representation limitation where a reading backs it, and a Diagram tag
+    that no reading backs is a possible issue. Returns a summary of each game, and the
+    findings."""
     checked = check_pgn(text)
     games = read_games(text)
     findings: list[Finding] = []
@@ -109,7 +128,7 @@ def check(
                     index,
                 )
             )
-        findings += _comment_issues(game, index, book)
+        findings += _comment_issues(game, index, book, machine_read)
     summaries = [
         _summary(game, counted, index)
         for index, (game, counted) in enumerate(zip(games, checked["games"], strict=True), 1)
@@ -120,8 +139,30 @@ def check(
 def check_file(pgn: Path, book: Path | None = None) -> dict[str, Any]:
     """check() on a PGN file, against its book when one is given."""
     text = pgn.read_text(encoding="utf-8", errors="replace")
-    result = check(text, book_prose(book) if book else None)
-    return {"file": str(pgn), "book": str(book) if book else None, **result, "caveat": CAVEAT}
+    layer = text_layer(book) if book else None
+    prose = book_prose(book) if book and layer and layer.with_text else None
+    result = check(text, prose, machine_read=bool(layer and layer.machine_read))
+    return {
+        "file": str(pgn),
+        "book": str(book) if book else None,
+        **result,
+        "text_layer": _layer(layer),
+        "caveat": CAVEAT,
+    }
+
+
+def _layer(layer: TextLayer | None) -> dict[str, Any] | None:
+    """What report.json says of where a book's text layer comes from."""
+    if layer is None:
+        return None
+    return {
+        "machine_read": layer.machine_read,
+        "evidence": layer.evidence(),
+        "tool": layer.tool,
+        "pages": layer.pages,
+        "pages_with_text": len(layer.with_text),
+        "pages_over_scans": len(layer.over_scans),
+    }
 
 
 def report(folder: Path, images: bool = False, coverage: str | None = None) -> dict[str, Any]:
@@ -137,7 +178,8 @@ def report(folder: Path, images: bool = False, coverage: str | None = None) -> d
     work = folder / ".pgnify"
     records = read_records(work)
     log = _log(work / "log.jsonl")
-    prose_of: dict[Path, BookProse] = {}
+    prose_of: dict[Path, BookProse | None] = {}
+    layer_of: dict[Path, TextLayer] = {}
     outputs = []
     # By book key: the book's name, and the PGN files written from it with their games.
     names: dict[str, str] = {}
@@ -150,11 +192,19 @@ def report(folder: Path, images: bool = False, coverage: str | None = None) -> d
         book = Path(record["book_path"]) if record.get("book_path") else None
         book = book if book and book.is_file() else None
         if book and book not in prose_of:
-            prose_of[book] = book_prose(book)
+            layer_of[book] = text_layer(book)
+            # A file with no text layer at all gives nothing to compare the comments with.
+            prose_of[book] = book_prose(book) if layer_of[book].with_text else None
         text = pgn.read_text(encoding="utf-8", errors="replace")
         key = record.get("book_key")
         entries = [entry for entry in log if _of_book(entry, key)] if key else []
-        result = check(text, prose_of[book] if book else None, _readings(entries) if key else None)
+        layer = layer_of.get(book) if book else None
+        result = check(
+            text,
+            prose_of[book] if book else None,
+            _readings(entries) if key else None,
+            machine_read=bool(layer and layer.machine_read),
+        )
         result["findings"] += [asdict(f) for f in _doubtful_starts(entries, result["games"])]
         if key:
             names[key] = record.get("book") or key
@@ -166,6 +216,7 @@ def report(folder: Path, images: bool = False, coverage: str | None = None) -> d
                 "book": record.get("book"),
                 "book_found": book is not None,
                 **result,
+                "text_layer": _layer(layer),
                 "images": _images(folder, pgn, entries, result["games"]) if images else [],
                 "model_account": read_notes(pgn),
             }
@@ -189,7 +240,12 @@ def report(folder: Path, images: bool = False, coverage: str | None = None) -> d
                     asdict(finding)
                     for finding in _log_issues(entries, summaries, _positions(games))
                 ],
-                **({"coverage": _coverage(paths[key], games, coverage, pages)} if coverage else {}),
+                "text_layer": _layer(layer_of.get(paths[key])) if paths[key] else None,
+                **(
+                    {"coverage": _coverage(paths[key], games, coverage, pages, layer_of)}
+                    if coverage
+                    else {}
+                ),
             }
         )
     elsewhere = [
@@ -230,16 +286,25 @@ def markdown(reported: dict[str, Any]) -> str:
                 f"{_cell(' '.join(game['uncertain']))} |"
             )
         lines.append("")
+        layer = output.get("text_layer")
         for kind, heading in KINDS:
             found = [finding for finding in output["findings"] if finding["kind"] == kind]
             # Representation limitations are rare, and get a section only when there are some.
             if kind == "limitation" and not found:
                 continue
+            lower = [finding for finding in found if finding.get("basis")]
+            found = [finding for finding in found if not finding.get("basis")]
             lines += [f"### {heading}", ""]
-            if kind == "issue" and output["book_found"]:
-                lines += [MACHINE_READING, ""]
-            lines += [_line(finding) for finding in found] or ["None found."]
+            if kind == "issue" and output["book_found"] and layer:
+                if not layer["pages_with_text"]:
+                    lines += [NO_TEXT_LAYER, ""]
+                elif not layer["machine_read"]:
+                    lines += [MACHINE_READING, ""]
+            apart = f", apart from {len(lower)} of lower confidence below" if lower else ""
+            lines += [_line(finding) for finding in found] or [f"None found{apart}."]
             lines.append("")
+            if lower:
+                lines += _lower_confidence(lower, layer)
         if output["images"]:
             lines += ["### Diagrams beside their positions", ""]
             lines += ["| Game | The book's diagram | The game's position |", "|---|---|---|"]
@@ -282,10 +347,59 @@ def markdown(reported: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _lower_confidence(found: list[dict[str, Any]], layer: dict[str, Any] | None) -> list[str]:
+    """report.md's summary of comment text that a text layer that appears OCR-derived lacks: how
+    many passages, in how many games, and examples from as many games as it shows."""
+    games = sorted({finding["game"] for finding in found if finding["game"] is not None})
+    # An example from each game first, then the rest in order.
+    firsts = {finding["game"]: finding for finding in reversed(found)}
+    examples = [firsts[game] for game in games][:EXAMPLES]
+    examples += [finding for finding in found if finding not in examples][
+        : EXAMPLES - len(examples)
+    ]
+    evidence = layer["evidence"] if layer else ""
+    textless = layer["pages"] - layer["pages_with_text"] if layer else 0
+    # A comment from a page with no text is compared with text that does not hold it.
+    have = "has" if textless == 1 else "have"
+    blank = (
+        f" {counted(textless, 'page')} of the book's {layer['pages']} {have} no text at all, and "
+        "a comment that holds what such a page prints is counted here too."
+        if layer and textless
+        else ""
+    )
+    return [
+        "### Comment text against a text layer that appears OCR-derived: lower confidence",
+        "",
+        f"The book's text layer appears to be a machine reading of scanned pages: {evidence}. "
+        "That is evidence of where its text comes from, not that the text is wrong. A comment "
+        "copied faithfully from the printed page differs from such a layer wherever the layer "
+        "misreads the page, so each passage counted here may be the layer's error rather than "
+        "the comment's; the printed page decides. "
+        f"{counted(len(found), 'comment passage')}, in {counted(len(games), 'game')} "
+        f"({_numbers(games)}), {'is' if len(found) == 1 else 'are'} not word for word in the text "
+        f"layer.{blank} "
+        + (
+            f"{len(examples)} of them, from {'different games' if len(games) > 1 else 'its game'}:"
+            if len(examples) < len(found)
+            else "They are:"
+        ),
+        "",
+        *[_line(finding) for finding in sorted(examples, key=lambda f: f["game"] or 0)],
+        "",
+        f"All {len(found)} are in report.json, each with its basis.",
+        "",
+    ]
+
+
 def _coverage(
-    book: Path | None, games: Sequence[chess.pgn.Game], scope: str, pages: list[int] | None
+    book: Path | None,
+    games: Sequence[chess.pgn.Game],
+    scope: str,
+    pages: list[int] | None,
+    layer_of: dict[Path, TextLayer],
 ) -> dict[str, Any]:
-    """The book's text on the pages of the scope that no comment of the games holds."""
+    """The book's text on the pages of the scope that no comment of the games holds, each
+    possible omission of lower confidence where its pages' text appears to be a machine reading."""
     if book is None:
         return {"scope": scope, "book_found": False}
     comments = [
@@ -295,7 +409,13 @@ def _coverage(
         for text in (node.starting_comment, node.comment)
         if text
     ]
-    return {"scope": scope, "book_found": True, **asdict(book_coverage(book, comments, pages))}
+    found = asdict(book_coverage(book, comments, pages))
+    layer = layer_of.get(book) or text_layer(book)
+    for omission in found["omissions"]:
+        pages_of = range(omission["first_page"], omission["last_page"] + 1)
+        machine_read = any(layer.machine_read_page(page) for page in pages_of)
+        omission["basis"] = OCR_DERIVED if machine_read else None
+    return {"scope": scope, "book_found": True, **found, "evidence": layer.evidence()}
 
 
 def _coverage_lines(book: str, found: dict[str, Any], files: str) -> list[str]:
@@ -334,25 +454,30 @@ def _coverage_lines(book: str, found: dict[str, Any], files: str) -> list[str]:
         "been left out on purpose, such as the publisher's pages. Text of other parts of the "
         "book on the same pages shows here too, and on a scan, the text layer's misreadings.",
         "",
-        "### Possible omissions, for a person to judge",
-        "",
     ]
-    for omission in found["omissions"]:
-        first, last = omission["first_page"], omission["last_page"]
-        where = f"p. {first}" if first == last else f"pp. {first}-{last}"
-        again = (
-            ", a passage the book gives more often than the comments hold it"
-            if omission["repeated"]
-            else ""
-        )
-        lines.append(
-            f"- {where}, {omission['words']} words{again}: «{_inline(omission['excerpt'])}»"
-        )
+    ordinary = [omission for omission in found["omissions"] if not omission.get("basis")]
+    lower = [omission for omission in found["omissions"] if omission.get("basis")]
+    if ordinary or not lower:
+        lines += ["### Possible omissions, for a person to judge", ""]
+        lines += [_omission_line(omission) for omission in ordinary]
     if not found["omissions"]:
         if len(textless) == len(found["pages"]):
             lines.append("Not assessed: none of these pages has text.")
         else:
             lines.append("None found" + (" on the pages with text." if textless else "."))
+    if lower:
+        if ordinary:
+            lines.append("")
+        lines += [
+            "### Possible omissions on pages whose text appears OCR-derived: lower confidence",
+            "",
+            "On these pages the text layer appears to be a machine reading of scanned pages "
+            f"({found.get('evidence', '')}): a run listed here may be the layer's misreading, "
+            "such as a diagram's labels read as words, rather than words the comments leave "
+            "out. Each is listed, and each is of lower confidence; the printed page decides.",
+            "",
+            *[_omission_line(omission) for omission in lower],
+        ]
     lines += [
         "",
         f"Not listed: {counted(found['shorter_runs'], 'shorter run')} of words no comment holds, "
@@ -361,6 +486,24 @@ def _coverage_lines(book: str, found: dict[str, Any], files: str) -> list[str]:
         "",
     ]
     return lines
+
+
+def _numbers(numbers: list[int]) -> str:
+    """Numbers as "1, 3-5", consecutive ones as a range."""
+    return ", ".join(
+        str(first) if first == last else f"{first}-{last}" for first, last in ranges(numbers)
+    )
+
+
+def _omission_line(omission: dict[str, Any]) -> str:
+    first, last = omission["first_page"], omission["last_page"]
+    where = f"p. {first}" if first == last else f"pp. {first}-{last}"
+    again = (
+        ", a passage the book gives more often than the comments hold it"
+        if omission["repeated"]
+        else ""
+    )
+    return f"- {where}, {omission['words']} words{again}: «{_inline(omission['excerpt'])}»"
 
 
 def _page_ranges(pages: list[int]) -> str:
@@ -382,7 +525,23 @@ def as_text(checked: dict[str, Any]) -> str:
         found = [finding for finding in checked["findings"] if finding["kind"] == kind]
         if kind == "limitation" and not found:
             continue
-        lines += ["", f"{heading}:", *([_line(finding) for finding in found] or ["- none found"])]
+        lower = [finding for finding in found if finding.get("basis")]
+        found = [finding for finding in found if not finding.get("basis")]
+        apart = f", apart from {len(lower)} of lower confidence below" if lower else ""
+        listed = [_line(finding) for finding in found] or [f"- none found{apart}"]
+        lines += ["", f"{heading}:", *listed]
+        if lower:
+            layer = checked.get("text_layer") or {}
+            lines += [
+                "",
+                f"Comment text against a text layer that appears OCR-derived, lower confidence "
+                f"({layer.get('evidence', '')}): a passage here may be the layer's misreading "
+                "rather than the comment's; the printed page decides.",
+                *[_line(finding) for finding in lower],
+            ]
+    layer = checked.get("text_layer")
+    if checked.get("book") and layer and not layer["pages_with_text"]:
+        lines += ["", NO_TEXT_LAYER]
     return "\n".join([*lines, "", checked["caveat"]])
 
 
@@ -523,9 +682,12 @@ def _picture_read_as(placement: str, readings: list[dict[str, Any]] | None) -> s
     return None
 
 
-def _comment_issues(game: chess.pgn.Game, index: int, book: BookProse | None) -> list[Finding]:
-    """Comment text that no reading of the book's prose holds word for word, and passages a game
-    gives more often than the book does."""
+def _comment_issues(
+    game: chess.pgn.Game, index: int, book: BookProse | None, machine_read: bool = False
+) -> list[Finding]:
+    """Comment text that no reading of the book's prose holds word for word, of lower confidence
+    where the book's text layer appears to be a machine reading, and passages a game gives more
+    often than the book does."""
     findings = []
     seen: Counter[str] = Counter()
     for node in nodes(game):
@@ -544,6 +706,7 @@ def _comment_issues(game: chess.pgn.Game, index: int, book: BookProse | None) ->
                                 "issue",
                                 f"comment text not word for word in the book: «{quoted}»",
                                 index,
+                                OCR_DERIVED if machine_read else None,
                             )
                         )
     for plain, count in seen.items():
