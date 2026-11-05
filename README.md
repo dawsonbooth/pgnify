@@ -88,6 +88,15 @@ Then ask for the part you want, for instance: "Convert Chapter 5 of Workbook.epu
 
 Ask for one part at a time, such as a chapter or a section. The largest part tried so far is a chapter of 42 exercises and 6 examples, converted in one session.
 
+## Books your assistant must see
+
+Some books can only be read from pictures of their pages, which `doc_page` shows, so they need an assistant whose model reads images:
+
+- a scanned book, whose text is a picture, or a machine reading of one;
+- a book whose diagrams are set in a chess font, as some publishers' PDFs are. Its text layer holds the font's codes, not a board, and pgnify decodes no chess font: the model reads each board with `read_diagram`, from the picture of its page with a box around the board. The codes could be decoded by a program, so this is a limit of pgnify's tools, not of the book.
+
+With a model that cannot see images, such a book's diagrams, and a scan's moves, cannot be converted.
+
 ## Output files
 
 In the `--out` folder:
