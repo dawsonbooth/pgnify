@@ -2,7 +2,8 @@
 notation, with typography and spacing made uniform, cut into sentences. `pgnify check` and
 `pgnify report` look for each sentence of a PGN file's comments in the book's text, and the
 evaluation's scorer compares a run's comments with its truth's the same way. Move notation is
-left out of both, so that a book's figurines and a comment's piece letters compare equal.
+left out of both, so that a book's figurines and a comment's piece letters compare equal, and a
+figurine or a dagger for check typed as a character reads as the letter or + it stands for.
 
 Where the layout leaves the book's words in doubt, at a hyphen that ends a line and at the line
 after a picture, which may be its caption set inside a sentence, the book's text is read in each
@@ -28,10 +29,16 @@ NUMBER = re.compile(r"\d+(\.{1,3}|[a-z])?[,.;:]*")
 RESULT = re.compile(r"(1-0|0-1|1/2-1/2|\u00bd-\u00bd)[,.;:]*")
 # A soft hyphen only marks where a word may break: it is removed, with the line break after it.
 SOFT = re.compile(r"\u00ad\s*")
-# Curly quotes, dashes and the ellipsis as typed on a keyboard; a bullet as a space; and
-# parentheses removed, since a run may give a book's parenthesis as a comment of its own.
+# Curly quotes, dashes and the ellipsis as typed on a keyboard; a figurine as its piece's
+# letter, a pawn's as nothing, and a dagger for check as +; a bullet as a space; and parentheses
+# removed, since a run may give a book's parenthesis as a comment of its own.
 TYPOGRAPHY = str.maketrans(
     {
+        **dict(zip("♔♕♖♗♘♚♛♜♝♞", "KQRBNKQRBN", strict=True)),
+        "\u2659": "",
+        "\u265f": "",
+        "\u2020": "+",
+        "\u2021": "+",
         "\u2019": "'",
         "\u2018": "'",
         "\u201c": '"',

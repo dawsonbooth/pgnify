@@ -28,6 +28,13 @@ CAVEAT = (
     "Without a reference PGN to compare with, pgnify cannot tell whether every game, exercise, "
     "variation or passage of the book was found; it reports only what it can check."
 )
+# Said with the possible issues of a file whose comments are compared with its book's text.
+MACHINE_READING = (
+    "Comments are compared with the book's text layer, which in a scanned book is a machine "
+    "reading of the page: a comment copied faithfully from the printed page differs from it "
+    "wherever that reading is wrong, so a comment named here may be right. The printed page "
+    "decides."
+)
 # A passage repeated in one game's comments is reported when it has at least this many words.
 MIN_REPEATED_WORDS = 5
 # A picture smaller than this on either side, in pixels, is taken for a figurine, not a diagram.
@@ -229,6 +236,8 @@ def markdown(reported: dict[str, Any]) -> str:
             if kind == "limitation" and not found:
                 continue
             lines += [f"### {heading}", ""]
+            if kind == "issue" and output["book_found"]:
+                lines += [MACHINE_READING, ""]
             lines += [_line(finding) for finding in found] or ["None found."]
             lines.append("")
         if output["images"]:

@@ -7,7 +7,7 @@ import pytest
 from support import EXERCISES_PAGE, ONE_GAME, call_tools, move_specs
 
 from pgnify.prose import book_prose
-from pgnify.report import CAVEAT, check, report
+from pgnify.report import CAVEAT, MACHINE_READING, check, report
 
 FROM_THE_BOOK = "The king enters the square of the h-pawn just in time and the game is drawn."
 NOT_IN_IT = "White should resign at once because the pawn cannot be stopped by anything."
@@ -176,6 +176,27 @@ def test_words_missing_altered_or_added_are_still_not_word_for_word(
 
 
 @pytest.mark.parametrize(
+    "comment",
+    [
+        "Black holds after 12...Qc7 13.Be3 Rd8 14.Qg6+ though White keeps the initiative.",
+        "Black holds after 12...♕c7 13.♗e3 ♖d8 14.♕g6† though White keeps the initiative.",
+    ],
+    ids=["letters", "figurines-and-dagger"],
+)
+def test_a_comment_keeping_the_books_notation_compares_with_its_letters(
+    tmp_path: Path, comment: str
+) -> None:
+    doc = pymupdf.open()
+    doc.new_page().insert_textbox(
+        pymupdf.Rect(30, 30, 560, 800),
+        "Black holds after 12...Qc7 13.Be3 Rd8 14.Qg6+ though White keeps the initiative.",
+        fontsize=9,
+    )
+    doc.save(tmp_path / "notation.pdf")
+    assert not_word_for_word(comment, tmp_path / "notation.pdf") == []
+
+
+@pytest.mark.parametrize(
     ("second", "flagged"),
     [
         ("9th Match Game. Both sides fight for the open file.", False),
@@ -232,6 +253,23 @@ def test_report_md_gives_the_caveat_and_the_checks_before_the_models_account(
     assert page.index("### Possible issues") < page.index("### The model's own account")
     assert "> Everything is here." in page
     assert json.loads((tmp_path / "report.json").read_text())["caveat"] == CAVEAT
+
+
+def test_report_md_says_a_scans_text_layer_may_differ_from_a_faithful_comment(
+    primer: Path, tmp_path: Path
+) -> None:
+    call_tools(primer, tmp_path, [("write_pgn", {"games": [ONE_GAME]})])
+    report(tmp_path)
+    page = (tmp_path / "report.md").read_text()
+    issues = page.index("### Possible issues, for a person to judge")
+    assert page.index(MACHINE_READING) > issues
+    assert page.count(MACHINE_READING) == 1
+
+
+def test_report_md_says_nothing_of_text_layers_where_no_book_is_compared(tmp_path: Path) -> None:
+    (tmp_path / "forks.pgn").write_text('[Result "*"]\n\n1. e4 *\n')
+    report(tmp_path)
+    assert MACHINE_READING not in (tmp_path / "report.md").read_text()
 
 
 def test_a_report_with_no_notes_says_their_absence_proves_nothing(
