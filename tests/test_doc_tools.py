@@ -325,6 +325,17 @@ def test_doc_page_enlarges_a_small_part_to_300_dpi_at_most_and_cuts_a_box_to_the
     assert Path(shown["path"]).name != Path(past["path"]).name
 
 
+def test_doc_page_shows_a_box_at_300_dpi_up_to_the_size_its_description_gives(
+    two_pages: Path, tmp_path: Path
+) -> None:
+    # The description tells a model how large a box may be and still be shown at 300 dpi.
+    assert "376 points" in (doc_page.__doc__ or "") and int(PAGE_PIXELS * 72 / MOST_DPI) == 376
+    within = doc_page(str(two_pages), 1, str(tmp_path), [0, 0, 376, 100])
+    assert abs(within["width"] - 376 * MOST_DPI / 72) < 2
+    beyond = doc_page(str(two_pages), 1, str(tmp_path), [0, 0, 390, 100])
+    assert beyond["width"] == PAGE_PIXELS < 390 * MOST_DPI / 72
+
+
 def test_doc_page_shows_an_epub_page_as_its_layout_has_it(primer: Path, tmp_path: Path) -> None:
     shown = doc_page(str(primer), EXERCISES_PAGE, str(tmp_path))
     assert shown["box"] == [0.0, 0.0, *map(float, EPUB_PAGE)]

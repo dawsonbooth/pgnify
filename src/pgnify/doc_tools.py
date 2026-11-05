@@ -150,10 +150,12 @@ def doc_page(path: str, page: int, out_dir: str, box: list[float] | None = None)
     numbers them.
 
     box, optional: the part of the page to show, as [x0, y0, x1, y1] in points, the units of the
-    boxes doc_search and doc_images give, to see small print larger. A box past the page's edges
-    is cut to them. To read one diagram of a page that holds several, give read_diagram a box in
-    this picture's pixels around it, or show the diagram's part of the page and give read_diagram
-    that picture whole, as you must on a rotated page, whose picture is drawn turned.
+    boxes doc_search and doc_images give, to see small print larger: a box up to 376 points on
+    its longer side is shown at 300 dpi, the most doc_page enlarges, and a larger box less. A box
+    past the page's edges is cut to them. To read one diagram of a page that holds several, give
+    read_diagram a box in this picture's pixels around it, or show the diagram's part of the page
+    and give read_diagram that picture whole, as you must on a rotated page, whose picture is
+    drawn turned.
 
     Returns the picture itself, and page; its section; box, the part shown, in points; and path,
     width and height, the picture as read_diagram takes it, whose box is in these pixels.
