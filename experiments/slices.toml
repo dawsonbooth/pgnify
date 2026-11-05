@@ -50,6 +50,11 @@ source = "chess-structures"
 # The Introduction and Chapter 1, The Isolani: the book's pages 9 to 35.
 pages = [[10, 36]]
 
+[cuts.structures-37-69]
+source = "chess-structures"
+# Chapter 2, Hanging Pawns, and Chapter 3, Caro-Kann Formation: the book's pages 36 to 68.
+pages = [[37, 69]]
+
 # The part each slice's prompt names, in the book's own terms, and its truth.
 
 [slices.workbook-rook-forks]
@@ -131,4 +136,16 @@ truth = "data/local/truth/structures-smoke.pgn"
 cut = "structures-10-36"
 part = "pages 10 to 36, as pgnify's tools number them: the Introduction and Chapter 1, The Isolani"
 truth = "data/local/truth/structures-10-36.pgn"
+client_ceiling_usd = 15.0
+
+# The second validation, on pages the first did not see: Chapter 2, Hanging Pawns, and Chapter
+# 3, Caro-Kann Formation, with twelve games, their prose and their diagrams. It tests the
+# instructions that followed the first: marks read from close-ups, column and page tops checked,
+# no marks made from words, and an audit before a part is called complete. Its request is the
+# same as any other's. A real-client session only; data/local/truth/structures-37-69.md says how
+# it is checked. The safety ceiling on cost guards against runaway work and is no target.
+[slices.structures-37-69]
+cut = "structures-37-69"
+part = "pages 37 to 69, as pgnify's tools number them: Chapter 2, Hanging Pawns, and Chapter 3, Caro-Kann Formation"
+truth = "data/local/truth/structures-37-69.pgn"
 client_ceiling_usd = 15.0
