@@ -45,6 +45,11 @@ source = "chess-structures"
 # and 13, a scan whose text Acrobat's ClearScan replaced.
 pages = [[13, 14]]
 
+[cuts.structures-10-36]
+source = "chess-structures"
+# The Introduction and Chapter 1, The Isolani: the book's pages 9 to 35.
+pages = [[10, 36]]
+
 # The part each slice's prompt names, in the book's own terms, and its truth.
 
 [slices.workbook-rook-forks]
@@ -116,3 +121,14 @@ client_ceiling_usd = 15.0
 cut = "structures-smoke"
 part = "pages 13 and 14, as pgnify's tools number them: the opening of Chapter 1, The Isolani, and its first game as far as page 14 goes"
 truth = "data/local/truth/structures-smoke.pgn"
+
+# The validation that follows the smoke: the Introduction and the whole of Chapter 1, The
+# Isolani, with its eight games, a fragment that starts from a diagram, its prose and its
+# diagrams, some pictures holding more than one board. A real-client session only;
+# data/local/truth/structures-10-36.md says how it is checked. The safety ceiling on cost guards
+# against runaway work and is no target.
+[slices.structures-10-36]
+cut = "structures-10-36"
+part = "pages 10 to 36, as pgnify's tools number them: the Introduction and Chapter 1, The Isolani"
+truth = "data/local/truth/structures-10-36.pgn"
+client_ceiling_usd = 15.0
