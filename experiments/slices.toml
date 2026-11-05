@@ -55,6 +55,12 @@ source = "chess-structures"
 # Chapter 2, Hanging Pawns, and Chapter 3, Caro-Kann Formation: the book's pages 36 to 68.
 pages = [[37, 69]]
 
+[cuts.perfect]
+source = "perfect-your-chess"
+# The Preface, the Introduction, Make a Move's opening and its first eleven exercises, and their
+# solutions: a scan without a text layer, whose printed page numbers are pgnify's.
+pages = [[5, 10], [30, 32]]
+
 [cuts.woodpecker]
 source = "woodpecker-method"
 # The Summary of Tactical Motifs, Chapter 1's opening page with Easy Exercises 1 to 12, and
@@ -168,3 +174,17 @@ cut = "woodpecker"
 part = "pages 22 to 26, 32 to 34 and 224 to 226, as pgnify's tools number them: the Summary of Tactical Motifs, the opening of Chapter 1 with Easy Exercises 1 to 12, and those twelve exercises' solutions in Chapter 4"
 truth = "data/local/truth/woodpecker.pgn"
 client_ceiling_usd = 5.0
+
+
+# The validation of scans without a text layer: every word, move and mark read from the page's
+# picture, prose with epigraphs and numbered lists, a paragraph that runs on from one page to the
+# next, five and six diagrams to a page with the side to move printed as a letter, and dense
+# two-column figurine solutions printed twenty pages after their exercises, one of them holding a
+# diagram. Its request names the part alone. A real-client session only;
+# data/local/truth/perfect.md says how it is checked. The safety ceiling on cost guards against
+# runaway work and is no target.
+[slices.perfect]
+cut = "perfect"
+part = "pages 5 to 10 and 30 to 32, as pgnify's tools number them: the Preface, the Introduction, the opening of Make a Move with its first eleven exercises, and those exercises' solutions"
+truth = "data/local/truth/perfect.pgn"
+client_ceiling_usd = 8.0
