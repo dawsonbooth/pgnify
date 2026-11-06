@@ -92,7 +92,7 @@ Ask for one part at a time, such as a chapter or a section. The largest part tri
 
 pgnify supports a format when its tools give your assistant everything a conversion needs: the book's text, its pages as pictures, its diagrams read as positions, and a legality check of every move. That much is pgnify's, and it is the same whatever the model. How faithful a conversion turns out also depends on the model and the client: whether the model reads small marks and figurines correctly, uses what the book itself explains, such as its key to symbols, follows the conversion instructions and checks its own work. Two models given the same tools can convert the same pages differently, and `pgnify report` checks only part of the result.
 
-Tried so far, with Claude Sonnet 5.5 in Claude Code: EPUBs, born-digital PDFs whose diagrams are set in a chess font, and scanned PDFs whose text layer is a machine reading. Not yet: scanned PDFs without a text layer, and born-digital PDFs whose diagrams are pictures.
+Tried so far, with Claude Sonnet 5.5 in Claude Code: EPUBs, born-digital PDFs whose diagrams are set in a chess font, and scanned PDFs, whether their text layer is a machine reading or they have none. Not yet: born-digital PDFs whose diagrams are pictures.
 
 ### Books your assistant must see
 
