@@ -29,6 +29,8 @@ pgnify setup    # downloads 860 MB once, and keeps 310 MB in ~/.cache/pgnify
 
 Without the diagram reader or its weights, the other tools still work, and `read_diagram` tells the assistant what is missing.
 
+To read a scanned page as text, for an assistant whose model cannot see pictures, install [Tesseract](https://github.com/tesseract-ocr/tesseract), an OCR program that runs on your computer: `brew install tesseract` on macOS, `sudo apt install tesseract-ocr` on Debian or Ubuntu, or the [UB Mannheim installer](https://github.com/UB-Mannheim/tesseract/wiki) on Windows. pgnify runs it when the assistant asks for OCR, and says how to install it when it is missing.
+
 To update pgnify, run `uv tool upgrade pgnify`. It installs the repository's latest version, with the diagram reader if you installed it.
 
 ## Connect it to your assistant
@@ -94,14 +96,16 @@ pgnify supports a format when its tools give your assistant everything a convers
 
 Tried so far, with Claude Sonnet 5.5 in Claude Code: EPUBs, born-digital PDFs whose diagrams are set in a chess font, and scanned PDFs, whether their text layer is a machine reading or they have none. Not yet: born-digital PDFs whose diagrams are pictures.
 
-### Books your assistant must see
+### Assistants that see pictures, and those that read only text
 
-Some books can only be read from pictures of their pages, which `doc_page` shows, so they need an assistant whose model reads images:
+pgnify supports two kinds of assistant, and says which it has tried:
 
-- a scanned book, whose text is a picture, or a machine reading of one;
-- a book whose diagrams are set in a chess font, as some publishers' PDFs are. Its text layer holds the font's codes, not a board, and pgnify decodes no chess font: the model reads each board with `read_diagram`, from the picture of its page with a box around the board. The codes could be decoded by a program, so this is a limit of pgnify's tools, not of the book.
+- **An assistant whose model reads pictures** reads a scanned page, its moves, figurines and evaluation marks, from the pictures `doc_page` shows, and each diagram with `read_diagram`. Every format above was tried this way.
+- **An assistant whose model reads only text** gets what local tools can read without a picture. With the diagram reader and Tesseract installed:
+  - `doc_text` with `ocr` gives Tesseract's reading of each page as printed, named as a machine reading and never as the book's text, for a scan without a text layer or one whose text seems garbled. On the pages tried, it read 98 or 99 words of prose in 100 exactly and kept the order of two columns; it leaves out the boards it finds, so that their pieces are not read as letters.
+  - `read_diagram` with a page finds the boards printed in a frame on that page and reads each one, with the text printed beside it, such as an exercise's number, whose move it is, and the players.
 
-With a model that cannot see images, such a book's diagrams, and a scan's moves, cannot be converted.
+  What such an assistant cannot do: Tesseract reads no figurines, evaluation marks or other chess signs, so the moves of a scanned book that prints figurines come out partly unread or wrong, and legality alone cannot tell which. A board printed without a frame, or only in part, is not found. A book whose diagrams are set in a chess font has its boards found and read, but the figurines in its moves stay the font's codes. So text-only support for scanned notation is partial, and no text-only assistant has converted a book yet.
 
 ## Output files
 
@@ -156,7 +160,7 @@ pgnify checks every path the assistant gives it, but it is not a sandbox:
 - **Books kept separate**: each book's saved games, pictures and figurine readings go in a folder of their own, so two books served together never share them.
 - **Paths in errors**: the tools' error messages show `<books>`, `<out>` and `~` in place of your folders' paths.
 - **Network**: the server makes no network connections. `pgnify setup` downloads the weights from GitHub only when you run it without `--from`.
-- **Your rights**: the server and its diagram reader run as you, so a flaw in pgnify, or in a library it uses to read a book, could read or change any file you can. Point `--books` at a folder that holds only books, point `--out` at a folder for pgnify alone, and give it only files you would open in any other reader.
+- **Your rights**: the server, its diagram reader and Tesseract run as you, so a flaw in pgnify, or in a library it uses to read a book, could read or change any file you can. Point `--books` at a folder that holds only books, point `--out` at a folder for pgnify alone, and give it only files you would open in any other reader.
 - **What your assistant sees**: whatever the tools return goes to your assistant, and through it to its model provider: the text of the pages it reads, the lines its searches find, and the pictures of the pages `doc_page` shows it, which it asks for to read a scanned page or a diagram set in a chess font. `doc_images` returns no pictures, only their paths, though an assistant with file tools could open the pictures pgnify saves into `--out`.
 
 ## Books and copyright
