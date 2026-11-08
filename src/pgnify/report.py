@@ -18,6 +18,7 @@ from typing import Any, Literal
 
 import chess
 import chess.pgn
+import pymupdf
 
 from pgnify.chess_tools import check_pgn, nodes, ranges, read_games, render_board
 from pgnify.coverage import SHORTEST, scope_pages
@@ -678,7 +679,7 @@ def _picture_read_as(placement: str, readings: list[dict[str, Any]] | None) -> s
     """The picture of the book that the diagram reader read as the placement, if any."""
     for entry in readings or []:
         if entry["result"].get("placement") == placement:
-            return _picture(entry["arguments"]["image_path"])
+            return _where(entry)
     return None
 
 
@@ -748,8 +749,7 @@ def _doubtful_starts(entries: list[dict[str, Any]], games: list[dict[str, Any]])
         held = next(summary for summary in games if summary["game"] == game)
         exact = result["placement"] in (held["start"], held["diagram"])
         if said := _said({**result, "problems": []} if exact else result):
-            where = _picture(entry["arguments"]["image_path"])
-            findings.append(Finding("issue", f"{where} was read with {said}", game))
+            findings.append(Finding("issue", f"{_where(entry)} was read with {said}", game))
     return findings
 
 
@@ -762,8 +762,9 @@ def _log_issues(
     findings = []
     readings = _readings(entries)
     read = {_picture(entry["arguments"]["image_path"]) for entry in readings}
+    found = [(entry["page"], entry["on_page"]) for entry in readings if "on_page" in entry]
     for entry in readings:
-        result, where = entry["result"], _picture(entry["arguments"]["image_path"])
+        result, where = entry["result"], _where(entry)
         if not result["ok"]:
             findings.append(
                 Finding("issue", f"the diagram reader read no board in {where}: {result['reason']}")
@@ -793,7 +794,9 @@ def _log_issues(
         result = entry["result"]
         page_width, page_height = result["page_size"]
         for image in result["images"]:
-            if _picture(image["path"]) in read:
+            if _picture(image["path"]) in read or any(
+                page == result["page"] and _overlap(image["box"], box) > 0.5 for page, box in found
+            ):
                 continue
             if min(image["width"], image["height"]) < MIN_DIAGRAM_SIDE:
                 continue
@@ -825,8 +828,43 @@ def _log_issues(
 
 
 def _readings(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """The log's entries of diagrams the reader answered for, a board or a reason why none."""
-    return [entry for entry in entries if entry["tool"] == "read_diagram" and "result" in entry]
+    """The log's entries of diagrams the reader answered for, a board or a reason why none. Each
+    board read_diagram found on a page is an entry of its own, as if its part of the page's
+    picture had been read, with where it is: which board of which page, and its box on it."""
+    readings = []
+    for entry in entries:
+        if entry["tool"] != "read_diagram" or "result" not in entry:
+            continue
+        result = entry["result"]
+        if "boards" not in result:
+            readings.append(entry)
+            continue
+        for number, board in enumerate(result["boards"], start=1):
+            kept = ("placement", "flipped", "board", "doubts", "problems")
+            readings.append(
+                {
+                    **entry,
+                    "arguments": {"image_path": result["path"], "box": board["board"]},
+                    "result": {"ok": True, **{key: board[key] for key in kept}},
+                    "where": f"board {number} found on page {result['page']}",
+                    "page": result["page"],
+                    "on_page": board["box"],
+                }
+            )
+    return readings
+
+
+def _where(reading: dict[str, Any]) -> str:
+    """Where a reading's diagram is: a board found on a page, or the picture read."""
+    return reading.get("where") or _picture(reading["arguments"]["image_path"])
+
+
+def _overlap(a: list[float], b: list[float]) -> float:
+    """The two boxes' intersection over the smaller one's area."""
+    width = max(0.0, min(a[2], b[2]) - max(a[0], b[0]))
+    height = max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+    smaller = min((a[2] - a[0]) * (a[3] - a[1]), (b[2] - b[0]) * (b[3] - b[1]))
+    return width * height / smaller if smaller else 0.0
 
 
 def _said(result: dict[str, Any]) -> str:
@@ -891,18 +929,16 @@ def _read_summary(entries: list[dict[str, Any]]) -> dict[str, Any]:
     if not entries:
         return {}
     answered = [entry for entry in entries if "result" in entry]
-    pages = sorted(
-        {
-            page
-            for entry in answered
-            if entry["tool"] == "doc_text"
-            for page in entry["result"]["pages"]
-        }
-    )
-    return {
-        "pages read": _pages(pages) or "none",
+    texts = [entry for entry in answered if entry["tool"] == "doc_text"]
+    pages = sorted({page for entry in texts for page in entry["result"]["pages"]})
+    by_ocr = [entry for entry in texts if entry["arguments"].get("ocr")]
+    read_by_ocr = sorted({page for entry in by_ocr for page in entry["result"]["pages"]})
+    summary = {"pages read": _pages(pages) or "none"}
+    if read_by_ocr:
+        summary["pages read by OCR"] = _pages(read_by_ocr)
+    return summary | {
         "searches": sum(entry["tool"] == "doc_search" for entry in answered),
-        "diagrams read": sum(entry["tool"] == "read_diagram" for entry in answered),
+        "diagrams read": len(_readings(answered)),
         "games saved": len(
             {
                 entry["arguments"]["name"]
@@ -926,9 +962,10 @@ def _images(
     """For each game whose position is marked uncertain or was read with doubts, the picture its
     position was read from, beside a drawing of the position, saved in report-images/."""
     readings = [
-        entry["result"] | {"image_path": entry["arguments"]["image_path"]}
-        for entry in entries
-        if entry["tool"] == "read_diagram" and entry.get("result", {}).get("ok")
+        entry["result"]
+        | {"image_path": entry["arguments"]["image_path"], "found": "on_page" in entry}
+        for entry in _readings(entries)
+        if entry["result"]["ok"]
     ]
     shown = []
     target = folder / "report-images" / pgn.stem
@@ -952,9 +989,12 @@ def _images(
             "book": None,
         }
         picture = (folder / source["image_path"]) if source else None
-        if picture and picture.is_file():
+        if source and picture and picture.is_file():
             copied = target / f"game-{game['game']}-book{picture.suffix}"
-            shutil.copyfile(picture, copied)
+            if source["found"]:
+                _cut(picture, source["board"], copied)
+            else:
+                shutil.copyfile(picture, copied)
             drawn["book"] = copied.relative_to(folder).as_posix()
         shown.append(drawn)
     return shown
@@ -963,6 +1003,16 @@ def _images(
 def _of_book(entry: dict[str, Any], key: str) -> bool:
     """Whether a log entry concerns the book whose folder is key: by the book it was logged
     with, or, for read_diagram, by the book folder its picture is in."""
-    if entry["tool"] == "read_diagram":
+    if entry["tool"] == "read_diagram" and "image_path" in entry["arguments"]:
         return f"/books/{key}/" in f"/{entry['arguments']['image_path']}"
     return entry.get("book", {}).get("key") == key
+
+
+def _cut(picture: Path, box: list[int], target: Path) -> None:
+    """Save the part of the picture box covers, in its pixels: a board found on a page."""
+    whole = pymupdf.Pixmap(str(picture))
+    part = pymupdf.IRect(box) & whole.irect
+    cut = pymupdf.Pixmap(whole.colorspace, part, whole.alpha)
+    cut.copy(whole, part)
+    cut.set_origin(0, 0)
+    cut.save(str(target))

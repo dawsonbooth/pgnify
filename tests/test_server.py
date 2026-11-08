@@ -9,7 +9,16 @@ from typing import Any
 import pytest
 from mcp import Client
 from mcp.types import CallToolResult, GetPromptResult, ImageContent, TextContent, Tool
-from support import EXERCISES_PAGE, ONE_GAME, PRIMER_PAGES, RUY, call_tools, in_session, move_specs
+from support import (
+    EXERCISES_PAGE,
+    ONE_GAME,
+    PRIMER_PAGES,
+    RUY,
+    call_tools,
+    exercises,
+    in_session,
+    move_specs,
+)
 
 from pgnify import instructions
 from pgnify.outputs import NOTES_HEADING
@@ -191,6 +200,44 @@ def test_read_diagram_refuses_a_picture_doc_images_did_not_extract(
     result = _call(primer, tmp_path, "read_diagram", {"image_path": picture})
     assert result.is_error
     assert "image_path must be a picture doc_images extracted or doc_page showed" in _text(result)
+
+
+def test_read_diagram_asks_for_a_picture_or_a_page(primer: Path, tmp_path: Path) -> None:
+    result = _call(primer, tmp_path, "read_diagram", {})
+    assert result.is_error
+    assert "give image_path" in _text(result) and "or page" in _text(result)
+
+
+def test_read_diagram_takes_a_page_alone(primer: Path, tmp_path: Path) -> None:
+    arguments = {"page": EXERCISES_PAGE, "image_path": "page12-1.png"}
+    result = _call(primer, tmp_path, "read_diagram", arguments)
+    assert result.is_error
+    assert "give page alone" in _text(result)
+
+
+def test_the_log_keeps_whether_doc_text_read_by_ocr(primer: Path, tmp_path: Path) -> None:
+    call_tools(primer, tmp_path, [("doc_text", {"first_page": 9})])
+    (entry,) = [json.loads(line) for line in (tmp_path / ".pgnify" / "log.jsonl").open()]
+    assert entry["arguments"] == {"first_page": 9, "last_page": None, "ocr": False}
+
+
+@pytest.mark.live
+@pytest.mark.usefixtures("checkout_weights")
+def test_the_log_keeps_the_boards_found_on_a_page_without_the_text_beside_them(
+    tmp_path: Path,
+) -> None:
+    book = exercises(tmp_path)
+    result = _call(book, tmp_path / "out", "read_diagram", {"page": 1})
+    assert not result.is_error
+    found = result.structured_content
+    assert found["path"].startswith(".pgnify/books/") and len(found["boards"]) == 2
+    assert found["boards"][0]["text"]["left"]
+    (entry,) = [json.loads(line) for line in (tmp_path / "out" / ".pgnify" / "log.jsonl").open()]
+    assert entry["arguments"] == {"page": 1}
+    assert [board["placement"] for board in entry["result"]["boards"]] == [
+        board["placement"] for board in found["boards"]
+    ]
+    assert all("text" not in board for board in entry["result"]["boards"])
 
 
 def test_doc_page_gives_the_model_the_picture_itself_and_its_path_in_the_book_folder(

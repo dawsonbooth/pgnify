@@ -16,12 +16,19 @@ in the whole picture; whether the board is printed from Black's side; and for ea
 a1 to h8, the piece it holds in FEN's letters ("" for none), how sure the model is, and its
 second choice. A picture in which it reads no board gives {"failure": REASON}.
 
+{"picture": PATH, "find": true} asks for the places on a page's picture where a board may be,
+as frames.py finds them, each read as a box is, but for a place a board read before it covers:
+it gives {"candidates": [...]}, each with the place's box, found_by and edge, and the reading,
+or failure, under "reading". A board read with no piece on it gives its box with its failure.
+The models are loaded at the first reading, so that a page with no place to read loads none.
+
     python -m pgnify.recogniser --weights DIR
 
 with pgnify's diagrams extra installed, DIR holding the weights `pgnify setup` installs.
 """
 
 import argparse
+import functools
 import json
 import os
 import sys
@@ -47,9 +54,12 @@ def main() -> None:
     sys.stdout = sys.stderr
     from PIL import Image
 
-    from pgnify.recogniser.chess_diagram_to_fen.reading import Models
+    @functools.cache
+    def models():
+        from pgnify.recogniser.chess_diagram_to_fen.reading import Models
 
-    models = Models.load(Path(arguments.weights))
+        return Models.load(Path(arguments.weights))
+
     for line in sys.stdin:
         request = json.loads(line)
         try:
@@ -60,9 +70,30 @@ def main() -> None:
             reading = {"failure": f"the picture could not be read: {type(error).__name__}"}
         else:
             with picture:
-                reading = _read_request(picture, request.get("box"), models)
+                if request.get("find"):
+                    reading = _find(picture, models)
+                else:
+                    reading = _read_request(picture, request.get("box"), models())
         out.write(json.dumps(reading) + "\n")
         out.flush()
+
+
+def _find(picture, models) -> dict:
+    """The places on the picture where a board may be, in the search's order, each with its
+    reading, but for those a board read before them covers."""
+    import numpy as np
+
+    from pgnify.recogniser import frames
+
+    places, boards = [], []
+    for place in frames.candidates(np.asarray(picture.convert("L"))):
+        if frames.covered(place, boards):
+            continue
+        reading = _read_request(picture, place["box"], models())
+        places.append({**place, "reading": reading})
+        if "placement" in reading:
+            boards.append(reading["board"])
+    return {"candidates": places}
 
 
 def _read_request(picture, box: list | None, models) -> dict:
@@ -107,7 +138,10 @@ def read(picture, models) -> dict:
     if result.corners_px is None:
         return {"failure": "the board's corners were not found"}
     if result.fen is None:
-        return {"failure": "no piece read on the board"}
+        corners = result.corners_px.tolist()
+        xs, ys = [x for x, _ in corners], [y for _, y in corners]
+        board = [min(xs), min(ys), max(xs), max(ys)]
+        return {"failure": "no piece read on the board", "board": board}
     turned = result.board_is_flipped
     squares = []
     for square in range(64):

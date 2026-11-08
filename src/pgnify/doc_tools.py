@@ -9,10 +9,15 @@ from typing import Any
 
 import pymupdf
 
+from pgnify import tesseract
+
 # The most page text one doc_text call gives, in characters, as its docstring says. Claude Code
 # saves a tool result longer than about 50,000 characters to a file instead of passing it on,
 # and a model with only these tools cannot read that file.
 TEXT_LIMIT = 20_000
+# The most pages one doc_text call reads by OCR, so that a call's board search and reading, a few
+# seconds a page, stay within a minute or so, and none is spent on pages past the text limit.
+OCR_PAGES = 10
 # The longer side of the picture doc_page shows, in pixels: Anthropic's long-edge limit for older
 # models, which scale a page down further, to about 900 by 1,340, and below Claude Code's 2,000;
 # newer models, Sonnet 5.5 among them, take it whole. A book's whole page comes out at about 135
@@ -41,7 +46,12 @@ def doc_info(path: str) -> dict[str, Any]:
 
 
 def doc_text(
-    path: str, first_page: int, last_page: int | None = None, numbered: bool = False
+    path: str,
+    first_page: int,
+    last_page: int | None = None,
+    numbered: bool = False,
+    ocr: bool = False,
+    out_dir: str | None = None,
 ) -> dict[str, Any]:
     """Extract the text of a page or a range of pages, both ends included, pages counting from 1.
     Each picture on a page appears in the text at its place, as [picture N: id], inside its line
@@ -59,30 +69,125 @@ def doc_text(
     of text, or one longer page: a longer range is cut after the last whole page that fits, and
     next_page says where to continue.
 
+    ocr, optional, for a PDF: true to read each page as printed with Tesseract, OCR that runs on
+    this computer if it is installed, in place of the text layer: for a scanned page without
+    text, or one whose text layer seems garbled. The reading is a machine reading of the page,
+    never the book's text: Tesseract reads no figurines, evaluation marks or other chess signs,
+    which come out as letters or other characters, or not at all, and it may misread or drop any
+    word. Its lines come in the order Tesseract reads the page, column by column, with no empty
+    lines and no picture marks. Pages take a few seconds each, and one call reads at most 10.
+    Where the diagram reader is installed, the boards it finds on a page are left out of the
+    reading, so that their pieces are not read as letters, and listed as boards_left_out;
+    read_diagram with the page reads them.
+
     Returns pages, each with its page number, its section (the table-of-contents entries it falls
     under, outermost first) and its text; and next_page, the first page of the range not given,
-    or null when the whole range was.
+    or null when the whole range was. without_text names the pages of a PDF that have pictures
+    and no text layer, and how to read them. With ocr, ocr names the reading and each page gives
+    boards_left_out, in points, where boards were left out.
     """
     last = first_page if last_page is None else last_page
     if last < first_page:
         raise ValueError(f"pages {first_page} to {last} run backwards")
+    epub = Path(path).suffix.lower() == ".epub"
+    if epub and ocr:
+        raise ValueError("ocr is for a PDF's pages: doc_text gives an EPUB's own text without it")
     starts: dict[int, frozenset[int]] = {}
-    if Path(path).suffix.lower() == ".epub":
+    if epub:
         from pgnify.paragraphs import paragraph_starts
 
         starts = paragraph_starts(path)
     with pymupdf.open(path) as doc:
         _page(doc, last)  # Check the last page now: a range cut short never reaches it.
         toc = doc.get_toc()
+        numbers = list(range(first_page, last + 1))
+        reading = None
+        if ocr:
+            numbers = numbers[:OCR_PAGES]
+            reading = _Reading(path, numbers, out_dir)
         pages: list[dict[str, Any]] = []
-        size = 0
-        for number in range(first_page, last + 1):
-            text = _given(page_text(_page(doc, number)), starts.get(number, frozenset()), numbered)
-            if pages and size + len(text) > TEXT_LIMIT:
-                return {"pages": pages, "next_page": number}
-            pages.append({"page": number, "section": _section(toc, number), "text": text})
-            size += len(text)
-        return {"pages": pages, "next_page": None}
+        size, textless = 0, []
+        for number in numbers:
+            page = _page(doc, number)
+            if reading is not None:
+                given = reading.of(page, number)
+            else:
+                text = page_text(page)
+                given = {"text": _given(text, starts.get(number, frozenset()), numbered)}
+                if not epub and not page.get_text("text").strip() and page.get_image_info():
+                    textless.append(number)
+            if pages and size + len(given["text"]) > TEXT_LIMIT:
+                return _text_result(pages, number, reading, textless)
+            pages.append({"page": number, "section": _section(toc, number), **given})
+            size += len(given["text"])
+        following = numbers[-1] + 1
+        return _text_result(pages, following if following <= last else None, reading, textless)
+
+
+class _Reading:
+    """Tesseract's reading of the pages of a doc_text call, each with the boards the diagram
+    reader finds on it left white, when the reader is installed."""
+
+    def __init__(self, path: str, numbers: list[int], out_dir: str | None):
+        from pgnify import diagram_tools
+
+        self.engine = tesseract.version()
+        # What the diagram reader lacks, if anything, so that no board is found.
+        self.missing = diagram_tools.missing()
+        self.boards: dict[int, list[pymupdf.Rect]] = {}
+        self.blank: dict[int, list[pymupdf.Rect]] = {}
+        if self.missing is None:
+            assert out_dir is not None, "boards are found on pictures saved in out_dir"
+            self.boards = diagram_tools.find_boards(path, numbers, out_dir)
+            self.blank = {
+                number: [diagram_tools.framed(board) for board in boards]
+                for number, boards in self.boards.items()
+            }
+
+    def of(self, page: pymupdf.Page, number: int) -> dict[str, Any]:
+        lines = tesseract.read(page, blank=self.blank.get(number, []))
+        given: dict[str, Any] = {"text": "".join(line.text + "\n" for line in lines)}
+        if self.missing is None:
+            boards = self.boards.get(number, [])
+            given["boards_left_out"] = [[round(value, 1) for value in box] for box in boards]
+        return given
+
+    def name(self) -> str:
+        named = (
+            f"{self.engine}, {tesseract.LANGUAGE}, at {tesseract.DPI} dpi: a machine reading of "
+            "each page as printed, made on request, not the book's text layer"
+        )
+        if self.missing is not None:
+            named += (
+                f". No board is left out of it, since {self.missing}: a diagram's pieces may "
+                "come out as letters"
+            )
+        return named
+
+
+def _text_result(
+    pages: list[dict[str, Any]],
+    next_page: int | None,
+    reading: _Reading | None,
+    textless: list[int],
+) -> dict[str, Any]:
+    result: dict[str, Any] = {"pages": pages, "next_page": next_page}
+    given = {page["page"] for page in pages}
+    if without := [number for number in textless if number in given]:
+        result["without_text"] = (
+            f"{_listed(without)} {'has' if len(without) == 1 else 'have'} no text layer, only "
+            "pictures: doc_text with ocr reads a page with Tesseract, and doc_page shows it"
+        )
+    if reading is not None:
+        result["ocr"] = reading.name()
+    return result
+
+
+def _listed(numbers: list[int]) -> str:
+    """Page numbers in words, such as "pages 5, 6 and 9"."""
+    if len(numbers) == 1:
+        return f"page {numbers[0]}"
+    return f"pages {', '.join(map(str, numbers[:-1]))} and {numbers[-1]}"
 
 
 def doc_search(path: str, query: str) -> dict[str, Any]:
@@ -99,7 +204,7 @@ def doc_search(path: str, query: str) -> dict[str, Any]:
         hits = []
         for page in doc:
             boxes = page.search_for(query)
-            lines = _boxed_lines(page) if boxes else []
+            lines = boxed_lines(page) if boxes else []
             for box in boxes:
                 middle = (box.tl + box.br) / 2
                 hits.append(
@@ -268,7 +373,8 @@ def _section(toc: list[list[Any]], number: int) -> list[str]:
     return section
 
 
-def _boxed_lines(page: pymupdf.Page) -> list[tuple[pymupdf.Rect, str]]:
+def boxed_lines(page: pymupdf.Page) -> list[tuple[pymupdf.Rect, str]]:
+    """The lines of the page's text layer, each with its box in points."""
     return [
         (pymupdf.Rect(line["bbox"]), _line_text(line))
         for block in page.get_text("dict")["blocks"]

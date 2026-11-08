@@ -69,14 +69,16 @@ def build_server(books: Path, out: Path, spanned: bool = False) -> MCPServer:
         return calls.run("doc_info", {}, book, lambda b: doc_tools.doc_info(str(b.path)))
 
     def doc_text(
-        first_page: int, last_page: int | None = None, book: BookName = None
+        first_page: int, last_page: int | None = None, ocr: bool = False, book: BookName = None
     ) -> dict[str, Any]:
-        return calls.run(
-            "doc_text",
-            {"first_page": first_page, "last_page": last_page},
-            book,
-            lambda b: doc_tools.doc_text(str(b.path), first_page, last_page, numbered=spanned),
-        )
+        def extract(b: Book) -> dict[str, Any]:
+            images = str(outputs.book_folder(b).images)
+            return doc_tools.doc_text(
+                str(b.path), first_page, last_page, numbered=spanned, ocr=ocr, out_dir=images
+            )
+
+        arguments = {"first_page": first_page, "last_page": last_page, "ocr": ocr}
+        return calls.run("doc_text", arguments, book, extract)
 
     def doc_search(query: str, book: BookName = None) -> dict[str, Any]:
         return calls.run(
@@ -108,8 +110,33 @@ def build_server(books: Path, out: Path, spanned: bool = False) -> MCPServer:
         # place of its blocks, and the picture is the point.
         return CallToolResult(content=[text, picture])
 
-    def read_diagram(image_path: str, box: list[float] | None = None) -> dict[str, Any]:
+    def read_diagram(
+        image_path: str | None = None,
+        box: list[float] | None = None,
+        page: int | None = None,
+        book: BookName = None,
+    ) -> dict[str, Any]:
+        if page is not None:
+
+            def find(b: Book) -> dict[str, Any]:
+                if image_path is not None or box is not None:
+                    raise ValueError(
+                        "give page alone, to find the page's boards, or image_path and box, "
+                        "to read a picture"
+                    )
+                images = str(outputs.book_folder(b).images)
+                result = diagram_tools.read_page(str(b.path), page, images)
+                result["path"] = Path(result["path"]).relative_to(outputs.folder).as_posix()
+                return result
+
+            return calls.run("read_diagram", {"page": page}, book, find)
+
         def read(_: Book | None) -> dict[str, Any]:
+            if image_path is None:
+                raise ValueError(
+                    "give image_path, a picture doc_images or doc_page returned, or page, a "
+                    "page whose boards to find"
+                )
             result = diagram_tools.read_diagram(str(outputs.picture(image_path)), box)
             if "reason" in result:
                 result["reason"] = calls.safe(result["reason"])
@@ -195,7 +222,7 @@ def build_server(books: Path, out: Path, spanned: bool = False) -> MCPServer:
         (check_fen, chess_tools.check_fen.__doc__),
         (check_pgn, chess_tools.check_pgn.__doc__),
         (write_pgn, WRITE_PGN),
-        (read_diagram, diagram_tools.read_diagram.__doc__),
+        (read_diagram, diagram_tools.READ_DIAGRAM),
         (doc_info, doc_tools.doc_info.__doc__),
         (
             doc_text,
@@ -364,6 +391,11 @@ def _summary(name: str, result: dict[str, Any], book: Book | None) -> dict[str, 
     if name == "doc_page":
         keep = ("page", "box", "path", "width", "height")
         return {key: result[key] for key in keep}
+    if name == "read_diagram" and "boards" in result:
+        # No page text: the boards and their readings, without the lines beside them.
+        boards = [{k: v for k, v in board.items() if k != "text"} for board in result["boards"]]
+        keep = ("page", "path", "width", "height", "unread")
+        return {**{key: result[key] for key in keep}, "boards": boards}
     if name == "read_diagram":
         return result
     if name == "validate_moves":

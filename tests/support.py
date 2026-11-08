@@ -1,16 +1,18 @@
 """Helpers and constants shared by the test modules."""
 
 import asyncio
+import shutil
 import zipfile
 from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from typing import Any
 
 import pymupdf
+import pytest
 from mcp import Client
 from mcp.types import CallToolResult
 
-from pgnify.chess_tools import MoveSpec
+from pgnify.chess_tools import MoveSpec, render_board
 from pgnify.server import build_server
 
 ROOT = Path(__file__).parents[1]
@@ -162,3 +164,87 @@ def born_digital(folder: Path, texts: list[str] | None = None) -> Path:
     path = folder / "born-digital.pdf"
     doc.save(path)
     return path
+
+
+# A page of two exercises, as a book of exercises prints them: each board with its number and
+# whose move it is to its left, its players under it, and prose under the boards.
+SKEWER = "6k1/5ppp/8/8/8/8/1Q3PPP/6K1 w - - 0 1"
+EXERCISES = (
+    (pymupdf.Rect(70, 80, 220, 230), FORK, ("1", "W"), "Fork Example"),
+    (pymupdf.Rect(270, 80, 420, 230), SKEWER, ("2", "B"), "Skewer Example"),
+)
+PROSE = "Both exercises show a piece that attacks two targets at once."
+
+
+def exercises(
+    folder: Path, scanned: bool = False, rotated: bool = False, boxed: bool = False
+) -> Path:
+    """A PDF page of the two EXERCISES and PROSE under them, set as text; or, scanned, the page
+    drawn at 200 dpi and kept as a picture alone, with no text layer; or turned a quarter; or
+    with a frame drawn round both exercises, as a test grid's is."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=460, height=600)
+    page.insert_text((40, 50), "Exercises", fontsize=18)
+    for number, (box, fen, (label, side), players) in enumerate(EXERCISES, start=1):
+        board = folder / f"board-{number}.png"
+        render_board(fen, board)
+        page.insert_image(box, filename=str(board))
+        page.insert_text((box.x0 - 30, box.y0 + 14), label, fontsize=12)
+        page.insert_text((box.x0 - 30, box.y0 + 30), side, fontsize=12)
+        page.insert_text((box.x0 + 10, box.y1 + 18), players, fontsize=11)
+    page.insert_text((40, 300), PROSE, fontsize=12)
+    if boxed:
+        page.draw_rect(pymupdf.Rect(30, 70, 430, 262), color=(0, 0, 0), width=1.5)
+    if scanned:
+        doc, page = _scanned(page)
+    if rotated:
+        page.set_rotation(90)
+    kinds = (("-scanned", scanned), ("-rotated", rotated), ("-boxed", boxed))
+    path = folder / f"exercises{''.join(name for name, on in kinds if on)}.pdf"
+    doc.save(path)
+    return path
+
+
+def scanned_text(folder: Path, columns: list[list[str]], hidden: str | None = None) -> Path:
+    """A scanned page of text, a picture alone: the columns, each a list of lines, side by side;
+    and with hidden, an invisible text layer over it that says something else."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=460, height=600)
+    width = (460 - 80) / len(columns)
+    for index, lines in enumerate(columns):
+        for row, line in enumerate(lines):
+            page.insert_text((40 + index * width, 60 + 18 * row), line, fontsize=12)
+    doc, page = _scanned(page)
+    if hidden is not None:
+        page.insert_text((40, 60), hidden, fontsize=12, render_mode=3)
+    path = folder / f"scanned-text-{len(columns)}{'-hidden' if hidden else ''}.pdf"
+    doc.save(path)
+    return path
+
+
+def _scanned(page: pymupdf.Page) -> tuple[pymupdf.Document, pymupdf.Page]:
+    """A new PDF of one page, the page drawn at 200 dpi and kept as a picture alone."""
+    picture = page.get_pixmap(dpi=200)
+    doc = pymupdf.open()
+    scan = doc.new_page(width=page.rect.width, height=page.rect.height)
+    scan.insert_image(scan.rect, stream=picture.tobytes("png"))
+    return doc, scan
+
+
+def stored_sideways(folder: Path, source: Path) -> Path:
+    """The first page of source stored turned a quarter, with a rotation that shows it upright,
+    as some scanners save a page."""
+    doc = pymupdf.open()
+    with pymupdf.open(source) as printed:
+        upright = printed[0].rect
+        page = doc.new_page(width=upright.height, height=upright.width)
+        page.show_pdf_page(page.rect, printed, 0, rotate=90)
+    page.set_rotation(90)
+    path = folder / f"{source.stem}-stored-sideways.pdf"
+    doc.save(path)
+    return path
+
+
+needs_tesseract = pytest.mark.skipif(
+    shutil.which("tesseract") is None, reason="Tesseract is not installed"
+)

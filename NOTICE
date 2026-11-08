@@ -25,6 +25,9 @@ NOT INCLUDED
 - The diagram reader's weights. `pgnify setup` downloads them from Chess_diagram_to_FEN's
   release 1.0, or copies them from a folder the user gives, and checks each file against the
   SHA-256 that src/pgnify/weights.py pins. pgnify does not distribute them.
+- Tesseract (Apache-2.0). doc_text's ocr option, and read_diagram's text beside the boards
+  it finds on a page without a text layer, run the tesseract program if the user installed
+  it. pgnify does not distribute it.
 - Books. pgnify reads only the files its user points it at, and its repository and packages
   hold no published book, no PGN made from one and no other text of one. The only book they
   hold, the test book data/fixtures/epub/pocket-primer/, was written as a test fixture and is

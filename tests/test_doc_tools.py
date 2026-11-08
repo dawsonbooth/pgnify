@@ -3,7 +3,18 @@ from pathlib import Path
 
 import pymupdf
 import pytest
-from support import EXERCISES_PAGE, PRIMER, PRIMER_PAGES, png, write_epub, write_text_epub
+from support import (
+    EXERCISES_PAGE,
+    PRIMER,
+    PRIMER_PAGES,
+    SENTENCE,
+    image_only,
+    needs_tesseract,
+    png,
+    scanned_text,
+    write_epub,
+    write_text_epub,
+)
 
 from pgnify.doc_tools import (
     MOST_DPI,
@@ -390,3 +401,113 @@ def test_doc_page_takes_a_box_as_doc_search_gives_it_on_a_rotated_page(tmp_path:
     assert whole["box"] == [0.0, 0.0, 400.0, 600.0]
     # Drawn turned, as a reader sees it: its longer side across.
     assert whole["width"] == PAGE_PIXELS > whole["height"]
+
+
+# Two columns of a page, each a paragraph.
+LEFT = [
+    "White begins with the",
+    "pawn to the fourth rank",
+    "and Black answers in",
+    "kind, so that both sides",
+    "have a stake in the",
+    "centre from the start",
+    "of the game as it goes.",
+]
+RIGHT = [
+    "Then the knights come",
+    "out to their natural",
+    "squares, where they",
+    "defend the pawns and",
+    "watch the centre, and",
+    "the bishops follow on",
+    "the next few moves.",
+]
+
+
+def test_doc_text_names_the_pages_of_a_pdf_that_have_no_text_layer(tmp_path: Path) -> None:
+    result = doc_text(str(image_only(tmp_path)), 1, 2)
+    assert result["without_text"].startswith("pages 1 and 2 have no text layer, only pictures")
+    assert "ocr" in result["without_text"]
+    assert "ocr" not in result
+
+
+def test_doc_text_names_no_page_without_text_in_a_typeset_book(two_pages: Path) -> None:
+    assert "without_text" not in doc_text(str(two_pages), 1, 2)
+
+
+def test_doc_text_names_no_blank_page_as_one_without_text(tmp_path: Path) -> None:
+    doc = pymupdf.open()
+    doc.new_page()
+    doc.save(tmp_path / "blank.pdf")
+    assert "without_text" not in doc_text(str(tmp_path / "blank.pdf"), 1)
+
+
+def test_doc_text_reads_no_epub_by_ocr(primer: Path) -> None:
+    with pytest.raises(ValueError, match="ocr is for a PDF's pages"):
+        doc_text(str(primer), 1, ocr=True)
+
+
+@needs_tesseract
+def test_doc_text_with_ocr_reads_a_scanned_page_and_names_the_reading(tmp_path: Path) -> None:
+    result = doc_text(str(scanned_text(tmp_path, [[SENTENCE]])), 1, ocr=True, out_dir=str(tmp_path))
+    (page,) = result["pages"]
+    assert page["text"] == SENTENCE + "\n"
+    assert result["ocr"].startswith("tesseract ")
+    assert "a machine reading of each page as printed, made on request" in result["ocr"]
+    assert "without_text" not in result
+
+
+@needs_tesseract
+def test_doc_text_with_ocr_reads_the_page_as_printed_not_its_text_layer(tmp_path: Path) -> None:
+    book = str(scanned_text(tmp_path, [[SENTENCE]], hidden="A different sentence entirely."))
+    assert "A different sentence entirely." in doc_text(book, 1)["pages"][0]["text"]
+    assert doc_text(book, 1, ocr=True, out_dir=str(tmp_path))["pages"][0]["text"] == SENTENCE + "\n"
+
+
+@needs_tesseract
+def test_doc_text_with_ocr_reads_two_columns_one_after_the_other(tmp_path: Path) -> None:
+    book = str(scanned_text(tmp_path, [LEFT, RIGHT]))
+    (page,) = doc_text(book, 1, ocr=True, out_dir=str(tmp_path))["pages"]
+    assert page["text"] == "\n".join(LEFT + RIGHT) + "\n"
+
+
+@needs_tesseract
+def test_doc_text_with_ocr_reads_pages_in_order_ten_at_most_and_says_where_to_go_on(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr("pgnify.diagram_tools.missing", lambda: "the reader is not installed")
+    book = pymupdf.open()
+    for name, column in (("left", LEFT), ("right", RIGHT)):
+        (tmp_path / name).mkdir()
+        with pymupdf.open(scanned_text(tmp_path / name, [column])) as scan:
+            book.insert_pdf(scan)
+    book.save(tmp_path / "two-scans.pdf")
+    path = str(tmp_path / "two-scans.pdf")
+    result = doc_text(path, 1, 2, ocr=True)
+    assert [page["text"] for page in result["pages"]] == [
+        "\n".join(LEFT) + "\n",
+        "\n".join(RIGHT) + "\n",
+    ]
+    assert result["next_page"] is None
+    monkeypatch.setattr("pgnify.doc_tools.OCR_PAGES", 1)
+    result = doc_text(path, 1, 2, ocr=True)
+    assert [page["page"] for page in result["pages"]] == [1]
+    assert result["next_page"] == 2
+
+
+@needs_tesseract
+def test_doc_text_numbers_no_line_of_an_ocr_reading(tmp_path: Path) -> None:
+    book = str(scanned_text(tmp_path, [[SENTENCE]], hidden="A different sentence entirely."))
+    assert doc_text(book, 1, numbered=True)["pages"][0]["text"].startswith("1| ")
+    numbered = doc_text(book, 1, numbered=True, ocr=True, out_dir=str(tmp_path))
+    assert numbered["pages"][0]["text"] == SENTENCE + "\n"
+
+
+@needs_tesseract
+def test_doc_text_with_ocr_says_no_board_is_left_out_without_the_diagram_reader(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr("pgnify.diagram_tools.missing", lambda: "the reader is not installed")
+    result = doc_text(str(scanned_text(tmp_path, [[SENTENCE]])), 1, ocr=True)
+    assert "No board is left out of it, since the reader is not installed" in result["ocr"]
+    assert "boards_left_out" not in result["pages"][0]

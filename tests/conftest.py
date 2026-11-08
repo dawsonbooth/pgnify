@@ -1,11 +1,44 @@
 """Shared fixtures: the CC0 Pocket Endgame Primer packed as an EPUB, and small PDFs and an EPUB
 made for the tests."""
 
+import os
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pymupdf
 import pytest
-from support import PRIMER, png, write_epub, write_text_epub
+from support import PRIMER, ROOT, png, write_epub, write_text_epub
+
+from pgnify import tesseract
+
+
+@pytest.fixture(scope="module")
+def checkout_weights() -> Iterator[None]:
+    """Live tests use a checkout's models/ weights, if present, unless PGNIFY_WEIGHTS is set."""
+    weights = ROOT / "models" / "chess-diagram-to-fen"
+    with pytest.MonkeyPatch.context() as patch:
+        if weights.is_dir() and "PGNIFY_WEIGHTS" not in os.environ:
+            patch.setenv("PGNIFY_WEIGHTS", str(weights))
+        yield
+
+
+@pytest.fixture
+def fake_tesseract(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> Iterator[Callable[[str], None]]:
+    """Puts first on PATH a tesseract command that runs the shell script it is given."""
+
+    def put(script: str) -> None:
+        folder = tmp_path / "fake-tesseract"
+        folder.mkdir(exist_ok=True)
+        command = folder / "tesseract"
+        command.write_text(f"#!/bin/sh\n{script}\n")
+        command.chmod(0o755)
+        monkeypatch.setenv("PATH", f"{folder}{os.pathsep}{os.environ['PATH']}")
+        tesseract.version.cache_clear()
+
+    yield put
+    tesseract.version.cache_clear()
 
 
 @pytest.fixture(scope="session")

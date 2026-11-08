@@ -879,3 +879,74 @@ def test_report_md_says_the_logs_findings_cover_a_books_files_together(
     section = page[page.index("## pocket-primer.epub: what the server's log shows") :]
     assert "a.pgn, b.pgn" in section
     assert "not that any one conversion is complete" in section
+
+
+def _log_found(log: Path, page: int, boards: list[dict[str, Any]]) -> None:
+    """Append a read_diagram entry of the boards found on a page of the book the log's first
+    entry read, with the fields report reads."""
+    book = json.loads(log.read_text().splitlines()[0])["book"]
+    picture = f".pgnify/books/{book['key']}/images/page{page}-shown.png"
+    result = {"page": page, "path": picture, "boards": boards, "unread": []}
+    entry = {"tool": "read_diagram", "arguments": {"page": page}, "book": book, "result": result}
+    with log.open("a") as file:
+        file.write(json.dumps(entry) + "\n")
+
+
+def _found(placement: str, box: list[float], doubts: list[dict[str, Any]]) -> dict[str, Any]:
+    """A board found on a page at box, in points, read as the placement with the doubts."""
+    reading = {**_reading(placement), "doubts": doubts}
+    del reading["ok"]
+    return {"box": box, "found_by": "square", **reading, "other_readings": []}
+
+
+def test_a_board_found_on_a_page_is_named_by_its_page_where_it_was_read_with_doubts(
+    primer: Path, tmp_path: Path
+) -> None:
+    spec = {"start_fen": f"{ROOK_ON_A1} w - - 0 1", "moves": move_specs("Ra8+")}
+    log, _ = _extract_pictures(
+        primer,
+        tmp_path,
+        [("build_pgn", {"spec": spec, "name": "one"}), ("write_pgn", {"names": ["one"]})],
+    )
+    doubts = [{"square": "a1", "piece": "R", "confidence": 0.5, "second": "r"}]
+    _log_found(log, EXERCISES_PAGE, [_found(ROOK_ON_A1, [40, 60, 200, 220], doubts)])
+    reported = report(tmp_path)
+    (output,) = reported["outputs"]
+    (doubtful,) = [f for f in output["findings"] if "read with doubts" in f["what"]]
+    assert doubtful["what"].startswith(f"board 1 found on page {EXERCISES_PAGE} was read with")
+    assert doubtful["game"] == 1
+    assert reported["books"][0]["read"]["diagrams read"] == 1
+
+
+def test_a_picture_on_which_a_board_was_found_on_its_page_counts_as_read(
+    primer: Path, tmp_path: Path
+) -> None:
+    extracted, *_ = call_tools(
+        primer,
+        tmp_path,
+        [("doc_images", {"page": EXERCISES_PAGE}), ("write_pgn", {"games": [ONE_GAME]})],
+    )
+    first, second = extracted.structured_content["images"]
+    log = tmp_path / ".pgnify" / "log.jsonl"
+    _log_found(log, EXERCISES_PAGE, [_found(ROOK_ON_A1, first["box"], [])])
+    (book,) = report(tmp_path)["books"]
+    unread = [f["what"] for f in book["findings"] if "extracted but never read" in f["what"]]
+    assert len(unread) == 1 and Path(second["path"]).name in unread[0]
+
+
+def test_the_report_names_the_pages_read_by_ocr(primer: Path, tmp_path: Path) -> None:
+    calls = [("doc_text", {"first_page": 9}), ("write_pgn", {"games": [ONE_GAME]})]
+    call_tools(primer, tmp_path, calls)
+    log = tmp_path / ".pgnify" / "log.jsonl"
+    book = json.loads(log.read_text().splitlines()[0])["book"]
+    entry = {
+        "tool": "doc_text",
+        "arguments": {"first_page": 10, "last_page": 11, "ocr": True},
+        "book": book,
+        "result": {"pages": [10, 11], "next": None},
+    }
+    with log.open("a") as file:
+        file.write(json.dumps(entry) + "\n")
+    read = report(tmp_path)["books"][0]["read"]
+    assert read["pages read"] == "9-11"
+    assert read["pages read by OCR"] == "10-11"
