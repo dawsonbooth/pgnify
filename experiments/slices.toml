@@ -61,6 +61,13 @@ source = "perfect-your-chess"
 # solutions: a scan without a text layer, whose printed page numbers are pgnify's.
 pages = [[5, 10], [30, 32]]
 
+[cuts.london12]
+source = "london-system-12"
+# The opening of Lesson 12 and Exercises 1 to 4 with their solutions: a born-digital PDF whose
+# diagrams are pictures, its figurines set in a font whose text layer gives letters, and an
+# ebook's controls printed on its pages.
+pages = [[433, 438]]
+
 [cuts.woodpecker]
 source = "woodpecker-method"
 # The Summary of Tactical Motifs, Chapter 1's opening page with Easy Exercises 1 to 12, and
@@ -188,3 +195,15 @@ cut = "perfect"
 part = "pages 5 to 10 and 30 to 32, as pgnify's tools number them: the Preface, the Introduction, the opening of Make a Move with its first eleven exercises, and those exercises' solutions"
 truth = "data/local/truth/perfect.pgn"
 client_ceiling_usd = 8.0
+
+
+# The brief check of born-digital PDFs whose diagrams are pictures: prose, four exercises printed
+# with their solutions after them, variations in brackets, figurines the text layer gives as
+# letters, and the ebook's controls, which are no part of the book's chess. Its request names the
+# part alone. A real-client session only; data/local/truth/london12.py says how the reference was
+# built. The safety ceiling on cost guards against runaway work and is no target.
+[slices.london12]
+cut = "london12"
+part = "pages 433 to 438, as pgnify's tools number them: the opening of Lesson 12 and Exercises 1 to 4 with their solutions"
+truth = "data/local/truth/london12.pgn"
+client_ceiling_usd = 3.0
