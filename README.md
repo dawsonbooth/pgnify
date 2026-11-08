@@ -105,7 +105,15 @@ pgnify supports two kinds of assistant, and says which it has tried:
   - `doc_text` with `ocr` gives Tesseract's reading of each page as printed, named as a machine reading and never as the book's text, for a scan without a text layer or one whose text seems garbled. On the pages tried, it read 98 or 99 words of prose in 100 exactly and kept the order of two columns; it leaves out the boards it finds, so that their pieces are not read as letters.
   - `read_diagram` with a page finds the boards printed in a frame on that page and reads each one, with the text printed beside it, such as an exercise's number, whose move it is, and the players.
 
-  What such an assistant cannot do: Tesseract reads no figurines, evaluation marks or other chess signs, so the moves of a scanned book that prints figurines come out partly unread or wrong, and legality alone cannot tell which. A board printed without a frame, or only in part, is not found. A book whose diagrams are set in a chess font has its boards found and read, but the figurines in its moves stay the font's codes. So text-only support for scanned notation is partial, and no text-only assistant has converted a book yet.
+  What such an assistant cannot rely on:
+
+  - **OCR misses and corrupts chess notation.** Tesseract reads no figurines, evaluation marks or other chess signs, and can misread or drop an exercise's number or another short label. The moves of a scanned book come out partly unread or wrong, and legality alone cannot tell which.
+  - **Leaving a board out of an OCR reading does not mean the text around it was all read.**
+  - **OCR text has none of the text layer's checks.** `pgnify report` compares the comments with a page's text layer, never with an OCR reading, and no span copies from one. The page itself stays available: `doc_page` shows it as printed, for an assistant or a person who can look.
+  - **Board finding has limits.** It finds only boards printed in a frame, not a board without one or printed in part. The places it lists as unread can include a frame that holds no board, such as a photograph's. The text it gives beside a board can be incomplete: a caption further than a third of the board's side away is not given, and on a scan Tesseract can cut a caption or miss a label.
+  - **Chess fonts stay codes.** A book whose diagrams are set in a chess font has its boards found and read, but the figurines in its moves stay the font's codes.
+
+  So a text-only assistant may be unable to settle a scanned book's notation without a model or a tool that reads it from the page. Its support for scanned books is partial, and no text-only assistant has converted a book yet.
 
 ## Output files
 
@@ -169,7 +177,7 @@ Use pgnify on books you own, for your own study. A PGN made with it holds the bo
 
 ## Experimental: copying comments from the book
 
-A span is a passage of the book's text, named by its page and line numbers. With `pgnify serve --spans`, `doc_text` numbers each page's lines, and `build_pgn` can copy a comment from the book by its spans, so that the model need not retype it. The option is off by default until a run shows a model using it well. On a scanned book, a span copies whatever misreadings the scan's text layer has.
+A span is a passage of the book's text, named by its page and line numbers. With `pgnify serve --spans`, `doc_text` numbers each page's lines, and `build_pgn` can copy a comment from the book by its spans, so that the model need not retype it. The option is off by default until a run shows a model using it well. On a scanned book, a span copies whatever misreadings the scan's text layer has. An OCR reading has no line numbers, so no span copies from it.
 
 ## Commands
 
