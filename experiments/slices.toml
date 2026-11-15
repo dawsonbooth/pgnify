@@ -75,6 +75,25 @@ source = "woodpecker-method"
 # 225, a born-digital PDF whose diagrams are set in a chess font.
 pages = [[22, 26], [32, 34], [224, 226]]
 
+[cuts.simple-chess-4]
+source = "simple-chess"
+# Chapter 4, Open Files: from its heading partway down page 64 to Chapter 5's heading on page 79,
+# as PyMuPDF lays the EPUB out.
+pages = [[64, 79]]
+
+[cuts.strategic-1-6]
+source = "strategic-chess-exercises"
+# The key to the symbols, pages 6 and 7; Exercises 1 to 6, pages 10 to 15; and their solutions,
+# pages 73 to 90, up to Solution 7 partway down page 90.
+pages = [[6, 7], [10, 15], [73, 90]]
+
+[cuts.endgame-course-4]
+source = "silmans-endgame-course"
+# Part Four, Endgames for Class "C" (1400-1599): from its heading at the top of page 136 to the end
+# of Final Thoughts on page 226; and the solutions to its tests, from the heading "Part Four" at
+# the top of page 731 to the end of Solution 14 on page 749, as PyMuPDF lays the EPUB out.
+pages = [[136, 226], [731, 749]]
+
 # The part each slice's prompt names, in the book's own terms, and its truth.
 
 [slices.workbook-rook-forks]
@@ -207,3 +226,39 @@ cut = "london12"
 part = "pages 433 to 438, as pgnify's tools number them: the opening of Lesson 12 and Exercises 1 to 4 with their solutions"
 truth = "data/local/truth/london12.pgn"
 client_ceiling_usd = 3.0
+# For the workflow benchmark's dry runs: the part and its key to symbols, pp. 4-5.
+scope_pages = [[4, 5], [433, 438]]
+forecast_usd = 0.5
+
+
+# The workflow benchmark's pilot, run by experiments/bench_session.py on the whole book in its
+# pinned environment. scope_pages are the pages the reference's items come from, with the key's, for
+# the exploration counts; forecast_usd is the forecast for the ordinary request on Sonnet 5.5 at
+# high effort, from which the watchdog's ceiling is drawn: a guard against runaway work and no
+# target.
+
+# P1, simple: a chapter of prose and illustrative play, from an EPUB made from a scan.
+[slices.simple-chess-4]
+cut = "simple-chess-4"
+part = "Chapter 4, Open Files"
+truth = "data/local/truth/simple-chess-4.pgn"
+scope_pages = [[64, 79]]
+forecast_usd = 2.0
+
+# P2, complex: six exercises whose solutions, 63 pages on, give whole games with the exercise's
+# position inside them.
+[slices.strategic-1-6]
+cut = "strategic-1-6"
+part = "Exercises 1 to 6 of Chapter 1, The middlegame exercises, with their solutions"
+truth = "data/local/truth/strategic-1-6.pgn"
+scope_pages = [[6, 7], [10, 15], [73, 90]]
+forecast_usd = 3.5
+
+# P3, long: instruction, rules and principles in 110 pages and 90 diagrams, with tests whose
+# solutions are printed 500 pages on; long enough to strain one context and to divide.
+[slices.endgame-course-4]
+cut = "endgame-course-4"
+part = 'Part Four, Endgames for Class "C" (1400-1599), with the solutions to its tests'
+truth = "data/local/truth/endgame-course-4.pgn"
+scope_pages = [[136, 226], [731, 749]]
+forecast_usd = 10.0

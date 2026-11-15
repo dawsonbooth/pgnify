@@ -1,0 +1,3 @@
+Plan the work before converting. Survey the book and write a book map in the format below, with work units that cover the part with no gap and no overlap, each with its pages and the items it owns; then go straight on, with no reply needed. Give each unit to a subagent{subagent_model} with the map, its unit and the output conventions; have it load the pgnify-convert skill first, save its games under its unit's name, and leave the PGN to you. When every unit has reported, reconcile: each item of the map converted once, and the same conventions throughout. Audit against the pages, then write the PGN in the book's order.
+
+{template}
