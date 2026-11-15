@@ -58,7 +58,8 @@ notes, optional: your account of the conversion, kept beside the PGN file as <na
 Writing the file again without notes deletes the notes written with it before.
 
 Returns file, the PGN file's name; saved, how many games it now holds; replaced, how many it
-held before; notes, whether notes were kept; and check_pgn's ok, dropped and games."""
+held before; notes, whether notes were kept; unwritten, the names of the games saved from this
+book that no file written from it holds; and check_pgn's ok, dropped and games."""
 
 
 def build_server(books: Path, out: Path, spanned: bool = False) -> MCPServer:
@@ -196,7 +197,8 @@ def build_server(books: Path, out: Path, spanned: bool = False) -> MCPServer:
             result = chess_tools.write_pgn(path=str(target), games=games, names=names, store=store)
             outputs.wrote(target, b, names or len(games or []), given)
             del result["path"]
-            return {"file": target.name, **result, "notes": bool(given)}
+            unwritten = outputs.unwritten(b)
+            return {"file": target.name, **result, "notes": bool(given), "unwritten": unwritten}
 
         arguments = {
             "names": names,

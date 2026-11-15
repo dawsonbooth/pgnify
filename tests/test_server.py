@@ -482,3 +482,169 @@ def test_the_servers_instructions_list_its_books(primer: Path, tmp_path: Path) -
 
     server_instructions = in_session(primer, tmp_path, read_instructions)
     assert server_instructions is not None and "'pocket-primer.epub'" in server_instructions
+
+
+def _saved(
+    name: str, book: str = "two-pages.pdf", moves: tuple[str, ...] = ("e4", "e5")
+) -> tuple[str, dict[str, Any]]:
+    return ("build_pgn", {"spec": {"moves": move_specs(*moves)}, "name": name, "book": book})
+
+
+def _saved_text(out: Path, book: str, name: str) -> str:
+    (folder,) = (
+        path for path in (out / ".pgnify" / "books").iterdir() if path.name.startswith(book)
+    )
+    return (folder / "games" / f"{name}.pgn").read_text()
+
+
+def test_write_pgn_names_the_saved_games_no_file_holds(books_folder: Path, tmp_path: Path) -> None:
+    *_, one, rest = call_tools(
+        books_folder,
+        tmp_path / "out",
+        [
+            _saved("a"),
+            _saved("b", moves=("d4", "d5")),
+            ("write_pgn", {"names": ["a"], "file": "one", "book": "two-pages.pdf"}),
+            ("write_pgn", {"names": ["b"], "file": "rest", "book": "two-pages.pdf"}),
+        ],
+    )
+    assert one.structured_content["unwritten"] == ["b"]
+    assert rest.structured_content["unwritten"] == []
+
+
+def test_write_pgn_counts_a_saved_game_given_as_text_exactly_as_written(
+    books_folder: Path, tmp_path: Path
+) -> None:
+    out = tmp_path / "out"
+    call_tools(books_folder, out, [_saved("a"), _saved("b", moves=("d4", "d5"))])
+    text = _saved_text(out, "two-pages", "a")
+    other = text.replace("1. e4 e5", "1. c4 c5")
+    assert other != text
+    (kept,) = call_tools(
+        books_folder,
+        out,
+        [("write_pgn", {"games": [f"\n{text}\n", other], "book": "two-pages.pdf"})],
+    )
+    assert kept.structured_content["unwritten"] == ["b"]
+
+
+def test_write_pgn_never_names_a_game_saved_from_another_book(
+    books_folder: Path, tmp_path: Path
+) -> None:
+    *_, written = call_tools(
+        books_folder,
+        tmp_path / "out",
+        [
+            _saved("a", "endgames/Pocket Primer.epub"),
+            ("write_pgn", {"games": [ONE_GAME], "book": "two-pages.pdf"}),
+        ],
+    )
+    assert written.structured_content["unwritten"] == []
+
+
+def test_write_pgn_names_a_game_a_file_written_again_dropped(
+    books_folder: Path, tmp_path: Path
+) -> None:
+    *_, whole, fewer = call_tools(
+        books_folder,
+        tmp_path / "out",
+        [
+            _saved("a"),
+            _saved("b", moves=("d4", "d5")),
+            ("write_pgn", {"names": ["a", "b"], "file": "f", "book": "two-pages.pdf"}),
+            ("write_pgn", {"names": ["a"], "file": "f", "book": "two-pages.pdf"}),
+        ],
+    )
+    assert whole.structured_content["unwritten"] == []
+    assert fewer.structured_content["unwritten"] == ["b"]
+
+
+def test_write_pgn_names_a_game_saved_again_after_its_file_was_written(
+    books_folder: Path, tmp_path: Path
+) -> None:
+    *_, again = call_tools(
+        books_folder,
+        tmp_path / "out",
+        [
+            _saved("a"),
+            ("write_pgn", {"names": ["a"], "file": "f", "book": "two-pages.pdf"}),
+            _saved("a", moves=("d4", "d5")),
+            ("write_pgn", {"games": [ONE_GAME], "file": "g", "book": "two-pages.pdf"}),
+        ],
+    )
+    assert again.structured_content["unwritten"] == ["a"]
+
+
+def test_write_pgn_checks_the_book_a_file_was_written_from(
+    books_folder: Path, tmp_path: Path
+) -> None:
+    *_, other = call_tools(
+        books_folder,
+        tmp_path / "out",
+        [
+            _saved("a"),
+            _saved("a", "endgames/Pocket Primer.epub"),
+            ("write_pgn", {"names": ["a"], "file": "one", "book": "two-pages.pdf"}),
+            (
+                "write_pgn",
+                {"games": [ONE_GAME], "file": "two", "book": "endgames/Pocket Primer.epub"},
+            ),
+        ],
+    )
+    assert other.structured_content["unwritten"] == ["a"]
+
+
+@pytest.mark.parametrize(
+    "quoted",
+    ["1. d4 {{ quoted:\n\n{text} }} 1-0", "1. d4 {{ quoted: {text}\n\n}} 1-0"],
+    ids=["followed", "preceded"],
+)
+def test_write_pgn_does_not_count_a_game_quoted_in_a_comment(
+    books_folder: Path, tmp_path: Path, quoted: str
+) -> None:
+    out = tmp_path / "out"
+    call_tools(books_folder, out, [_saved("a")])
+    text = _saved_text(out, "two-pages", "a")
+    (result,) = call_tools(
+        books_folder,
+        out,
+        [("write_pgn", {"games": [quoted.format(text=text)], "book": "two-pages.pdf"})],
+    )
+    assert result.structured_content["unwritten"] == ["a"]
+
+
+def test_write_pgn_ignores_whitespace_around_a_game_and_its_lines(
+    books_folder: Path, tmp_path: Path
+) -> None:
+    out = tmp_path / "out"
+    call_tools(books_folder, out, [_saved("a"), _saved("b", moves=("d4", "d5"))])
+    a, b = (_saved_text(out, "two-pages", name) for name in "ab")
+
+    def spaced(text: str) -> str:
+        return text.replace("\n", " \n ")
+
+    (result,) = call_tools(
+        books_folder,
+        out,
+        [
+            (
+                "write_pgn",
+                {"games": [spaced(a) + " ", " " + spaced(b) + "\n \n"], "book": "two-pages.pdf"},
+            )
+        ],
+    )
+    assert result.structured_content["unwritten"] == []
+
+
+def test_write_pgn_sorts_the_names(books_folder: Path, tmp_path: Path) -> None:
+    *_, result = call_tools(
+        books_folder,
+        tmp_path / "out",
+        [
+            _saved("game"),
+            _saved("game-1", moves=("d4", "d5")),
+            _saved("game_2", moves=("c4", "c5")),
+            ("write_pgn", {"games": [ONE_GAME], "book": "two-pages.pdf"}),
+        ],
+    )
+    assert result.structured_content["unwritten"] == ["game", "game-1", "game_2"]

@@ -161,6 +161,23 @@ class Outputs:
         }
         replace_json(self.work / "outputs.json", records)
 
+    def unwritten(self, book: Book) -> list[str]:
+        """The names of book's saved games that no PGN file written from it holds, sorted. A file
+        holds a game when it holds the game's saved text as a whole game, a blank line on each
+        side, compared without the whitespace around the text and its lines."""
+        held = [
+            _whole(file.read_text(encoding="utf-8", errors="replace"))
+            for name, record in read_records(self.work).items()
+            if record.get("book_key") == book.key and (file := self.folder / name).is_file()
+        ]
+        saved = {
+            path.stem: _whole(path.read_text(encoding="utf-8"))
+            for path in self.book_folder(book).games.glob("*.pgn")
+        }
+        return sorted(
+            name for name, game in saved.items() if not any(game in text for text in held)
+        )
+
     def log(self, entry: dict[str, Any]) -> None:
         with _unlinked(self.work / "log.jsonl").open("a", encoding="utf-8") as file:
             file.write(json.dumps(entry, ensure_ascii=False) + "\n")
@@ -195,6 +212,12 @@ def replace_json(path: Path, value: Any) -> None:
     text = json.dumps(value, indent=1, sort_keys=True, ensure_ascii=False) + "\n"
     written.write_text(text, encoding="utf-8")
     os.replace(written, path)
+
+
+def _whole(text: str) -> str:
+    """PGN text with the whitespace around it and its lines removed, a blank line on each side,
+    so that a game found in it is a whole game."""
+    return "\n\n" + re.sub(r"[ \t]*\n[ \t]*", "\n", text.strip()) + "\n\n"
 
 
 def _notes_text(notes: Path) -> str:
