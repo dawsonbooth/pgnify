@@ -192,28 +192,28 @@ def main() -> None:
         )
         watchdog.start()
         code = process.wait()
-    unwritten = _unwritten(work)
-    if unwritten:
+    leftover = unwritten(work)
+    if leftover:
         (folder / "unwritten.pgn").write_text(
-            "\n\n".join(text.strip() for _, text in unwritten) + "\n", encoding="utf-8"
+            "\n\n".join(text.strip() for _, text in leftover) + "\n", encoding="utf-8"
         )
     (folder / "session.json").write_text(
         json.dumps(
             {
                 "exit_code": code,
                 "open_seconds": round(time.time() - started, 1),
-                "seconds_to_final_answer": _to_final_answer(folder),
+                "seconds_to_final_answer": to_final_answer(folder),
                 "stopped_by": stopped[0] if stopped else None,
-                "cost_usd_at_list": round(_cost(config_dir), 4),
-                "unwritten_games": [name for name, _ in unwritten],
+                "cost_usd_at_list": round(cost(config_dir), 4),
+                "unwritten_games": [name for name, _ in leftover],
             },
             indent=1,
         )
     )
     stopped_by = f", stopped by {stopped[0]}" if stopped else ""
     print(f"\nSession closed{stopped_by}. Its folder: {folder}")
-    if unwritten:
-        print(f"{len(unwritten)} saved games were written to no PGN file: see unwritten.pgn.")
+    if leftover:
+        print(f"{len(leftover)} saved games were written to no PGN file: see unwritten.pgn.")
     if whole or "truth" in spec:
         scorer = "score_book.py" if whole else "score_slice.py"
         print(f"Score it: uv run python experiments/{scorer} {slice_name} {folder}")
@@ -244,7 +244,7 @@ def _untested(commit: str | None) -> str | None:
     return None
 
 
-def _to_final_answer(folder: Path) -> float | None:
+def to_final_answer(folder: Path) -> float | None:
     """The seconds from the request to the session's last message, its subagents' included, as
     score_slice.py counts them; None if no request was sent."""
     try:
@@ -253,19 +253,19 @@ def _to_final_answer(folder: Path) -> float | None:
         return None
 
 
-def _unwritten(work: Path) -> list[tuple[str, str]]:
+def unwritten(work: Path) -> list[tuple[str, str]]:
     """The games the server saved that no PGN file was written from, each with its PGN, book by
     book and by name: work a session left unfinished, or set aside."""
     written: dict[str, set[str]] = {}
     for record in read_records(work / ".pgnify").values():
         if isinstance(record.get("games"), list):
             written.setdefault(record["book_key"], set()).update(record["games"])
-    unwritten = []
+    found = []
     for games in sorted((work / ".pgnify" / "books").glob("*/games")):
         for saved in sorted(games.glob("*.pgn")):
             if saved.stem not in written.get(games.parent.name, set()):
-                unwritten.append((saved.stem, saved.read_text(encoding="utf-8")))
-    return unwritten
+                found.append((saved.stem, saved.read_text(encoding="utf-8")))
+    return found
 
 
 def _watch(
@@ -280,9 +280,9 @@ def _watch(
     while process.poll() is None:
         time.sleep(10)
         reason = None
-        if time.time() - _last_activity(config_dir, started) > IDLE_MINUTES * 60:
+        if time.time() - last_activity(config_dir, started) > IDLE_MINUTES * 60:
             reason = f"{IDLE_MINUTES} minutes without activity"
-        elif _cost(config_dir) > ceiling:
+        elif cost(config_dir) > ceiling:
             reason = f"the ${ceiling:.2f} safety ceiling"
         if reason and process.poll() is None:
             stopped.append(reason)
@@ -290,16 +290,16 @@ def _watch(
             return
 
 
-def _last_activity(config_dir: Path, started: float) -> float:
+def last_activity(config_dir: Path, started: float) -> float:
     """When the session's log last changed, or when the session started if it has no log yet."""
     return max(
         [started, *(log.stat().st_mtime for log in (config_dir / "projects").glob("**/*.jsonl"))]
     )
 
 
-def _cost(config_dir: Path) -> float:
+def cost(config_dir: Path) -> float:
     """The session's cost at list price, from its logs, its subagents' included: each request
-    counted once, at the highest count its entries record, by its model's price, the advisor's
+    counted once, at the count of its final entry, by its model's price, the advisor's
     passes by the advisor's. A model without a price is priced as the dearest that has one, so
     that the ceiling is never passed unseen."""
     requests: dict[str, tuple[str, dict]] = {}
@@ -318,7 +318,7 @@ def _cost(config_dir: Path) -> float:
                 continue
             key = message.get("id") or line
             model, before = requests.get(key, (str(message.get("model")), {}))
-            requests[key] = (model, score_slice.larger_usage(before, usage))
+            requests[key] = (model, score_slice.final_usage(before, usage))
     dearest = max(score_slice.PRICES, key=lambda name: score_slice.PRICES[name].output)
     return sum(
         score_slice.request_cost(model, usage) or score_slice.request_cost(dearest, usage) or 0.0
