@@ -18,8 +18,9 @@ DPI = 300
 # Seconds a page's reading may take: about 1.5 on a scanned page of a book.
 TIMEOUT = 120
 # Tesseract's page segmentation: a page, its columns found and read in order; a block of text
-# of one size, which reads the labels beside a board that a page's reading drops.
-PAGE, BLOCK = 3, 6
+# of one size, which reads the labels beside a board that a page's reading drops; a single
+# character.
+PAGE, BLOCK, CHARACTER = 3, 6, 10
 LANGUAGE = "eng"
 
 
@@ -90,6 +91,15 @@ def read(
     # From the picture's pixels to the page's points, unturned.
     back = pymupdf.Matrix(1, 0, 0, 1, picture.x, picture.y) * ~zoom * page.derotation_matrix
     return lines(process.stdout.decode(errors="replace"), back)
+
+
+def read_character(picture: bytes, characters: str) -> str:
+    """Tesseract's reading of a PNG holding one character, which it takes to be one of
+    characters: that character, or "" where it reads none. RuntimeError, as for read."""
+    version()
+    arguments = ["stdin", "stdout", "-l", LANGUAGE, "--psm", str(CHARACTER), "--dpi", str(DPI)]
+    arguments += ["-c", f"tessedit_char_whitelist={characters}"]
+    return _run(arguments, picture).stdout.decode(errors="replace").strip()
 
 
 def _run(arguments: list[str], picture: bytes = b"") -> subprocess.CompletedProcess[bytes]:

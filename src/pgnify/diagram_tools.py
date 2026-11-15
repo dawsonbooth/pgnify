@@ -10,6 +10,7 @@ the page's text layer, or, where the page has none, from Tesseract's reading of 
 beside the board (tesseract.py)."""
 
 import importlib.util
+import io
 import json
 import subprocess
 import sys
@@ -39,6 +40,18 @@ FRAME = 1 / 32
 # Points around a board within which a line of text is part of its diagram, such as the
 # coordinates a chess font sets against the board.
 TOUCH = 2.0
+# The orientation model's score from which its call is doubted: the file letters under the board
+# are read, and where they do not decide, the score is reported. On the boards of one book
+# printed from White's side its scores ran from 0 to 0.68, a dozen of them to 0.3 or more; the
+# boards it turned wrongly, in two books, scored 0.70 to 0.84.
+ORIENTATION_DOUBT = 0.3
+# How many more of the files' letters under a board must read in one order than in the other to
+# overrule the model: noise, such as a caption, reached 2 on 4 of 117 boards without letters;
+# boards with printed letters read 3 or more.
+LETTERS_DECIDE = 3
+# The height of the strip under a board in which its file letters stand, in its widths.
+LETTERS_STRIP = 0.12
+FILES = "abcdefgh"
 SIDES = ("above", "left", "right", "below")
 
 READ_DIAGRAM = """Read where the pieces stand in a chess diagram: in a picture, or on each board
@@ -61,12 +74,15 @@ each place found, and a place where it reads no board is dropped. A board printe
 frame, or only in part, is not looked for, so finding none does not show that the page has none.
 
 Returns, for a picture: ok; placement, the first field of a FEN, from White's side even when the
-picture shows the board from Black's; flipped, whether it does; board, where the board was
-found, as [x0, y0, x1, y1] in the picture's pixels, with or without a box; doubts, each square
-read with a confidence below 0.9, with the piece read there ("" for none), the confidence, from
-0 to 1, and the second choice; and problems, why the placement cannot be a legal position with
-either side to move, such as a missing king or a pawn on the first or last rank, empty when
-there is none. When it reads no board, ok is false and reason says why.
+picture shows the board from Black's; flipped, whether it does, as the orientation model says,
+checked against the file letters printed under the board where the model is unsure;
+orientation_doubt, the model's raw score for Black's side, which it calls above 0.7, when the
+score is 0.3 or more and the letters did not settle it, null otherwise; board, where the board
+was found, as [x0, y0, x1, y1] in the picture's pixels, with or without a box; doubts, each
+square read with a confidence below 0.9, with the piece read there ("" for none), the
+confidence, from 0 to 1, and the second choice; and problems, why the placement cannot be a
+legal position with either side to move, such as a missing king or a pawn on the first or last
+rank, empty when there is none. When it reads no board, ok is false and reason says why.
 
 Returns, for a page: page; its section; path, width and height, the page's picture, from which
 image_path and box read a board again; boards, from the top of the page down, left to right
@@ -110,7 +126,7 @@ def read_diagram(image_path: str, box: list[float] | None = None) -> dict[str, A
     [reading] = _run([request])
     if "failure" in reading:
         return {"ok": False, "reason": reading["failure"]}
-    return {"ok": True, **_reading(reading)}
+    return {"ok": True, **_oriented(_reading(reading), Path(image_path))}
 
 
 def read_page(path: str, number: int, out_dir: str) -> dict[str, Any]:
@@ -118,6 +134,10 @@ def read_page(path: str, number: int, out_dir: str) -> dict[str, Any]:
     it, as READ_DIAGRAM says. out_dir is where the page's picture is saved, as doc_page saves
     it."""
     [(shown, boards, unread)] = _found(path, [number], out_dir)
+    # other_readings, the placements read from other places, stay as the reader gave them.
+    oriented = [
+        {**board, "reading": _oriented(board["reading"], Path(shown["path"]))} for board in boards
+    ]
     with pymupdf.open(path) as doc:
         page = doc[number - 1]
         source, texts = _texts(page, [board["box"] for board in boards])
@@ -135,7 +155,7 @@ def read_page(path: str, number: int, out_dir: str) -> dict[str, Any]:
                 "other_readings": board["other_readings"],
                 "text": text,
             }
-            for board, text in zip(boards, texts, strict=True)
+            for board, text in zip(oriented, texts, strict=True)
         ],
         "text_source": source,
         "unread": [{"box": _rounded(place["box"]), "why": place["why"]} for place in unread],
@@ -272,7 +292,69 @@ def _reading(reading: dict[str, Any]) -> dict[str, Any]:
             if confidence < DOUBT_BELOW
         ],
         "problems": problems(reading["placement"]),
+        "orientation_doubt": (
+            reading["orientation"] if reading["orientation"] >= ORIENTATION_DOUBT else None
+        ),
     }
+
+
+def _oriented(reading: dict[str, Any], picture: Path) -> dict[str, Any]:
+    """The reading with its orientation checked against the file letters printed under the board,
+    where the model's score is 0.3 or more: where they read in an order that disagrees with its
+    call by LETTERS_DECIDE or more, either call, to White's side or to Black's, is turned round,
+    and where they agree the doubt is cleared. Otherwise the reading stands, with its doubt."""
+    if reading["orientation_doubt"] is None:
+        return reading
+    votes = _letters(picture, reading["board"])
+    if votes is None or abs(votes) < LETTERS_DECIDE:
+        return reading
+    reading = {**reading, "orientation_doubt": None}
+    if (votes < 0) == reading["flipped"]:
+        return reading
+    placement = reading["placement"][::-1]
+    return {
+        **reading,
+        "placement": placement,
+        "flipped": not reading["flipped"],
+        "doubts": [
+            {**doubt, "square": chess.square_name(63 - chess.parse_square(doubt["square"]))}
+            for doubt in reading["doubts"]
+        ],
+        "problems": problems(placement),
+    }
+
+
+def _letters(picture: Path, board: list[int]) -> int | None:
+    """How many more of the letters a to h Tesseract reads in order, each under the file it names,
+    than in reverse, in the strip under the board, in the picture's pixels; None where Tesseract or
+    the picture cannot be read."""
+    from PIL import Image, ImageOps
+
+    try:
+        with Image.open(picture) as opened:
+            grey = opened.convert("L")
+        x0, _, x1, y1 = board
+        width = x1 - x0
+        read = ""
+        for file in range(8):
+            cell = (
+                round(x0 + file * width / 8),
+                y1,
+                round(x0 + (file + 1) * width / 8),
+                min(grey.height, round(y1 + LETTERS_STRIP * width)),
+            )
+            if cell[2] <= cell[0] or cell[3] <= cell[1] or cell[0] < 0 or cell[2] > grey.width:
+                return None
+            part = grey.crop(cell).resize((4 * (cell[2] - cell[0]), 4 * (cell[3] - cell[1])))
+            # A character alone in white, which Tesseract reads better than one at the edge.
+            part = ImageOps.expand(part, border=20, fill=255)
+            data = io.BytesIO()
+            part.save(data, "PNG")
+            read += tesseract.read_character(data.getvalue(), FILES)[:1] or "-"
+    except (RuntimeError, OSError):
+        return None
+    forward = sum(a == b for a, b in zip(read, FILES, strict=True))
+    return forward - sum(a == b for a, b in zip(read, FILES[::-1], strict=True))
 
 
 def _fills(board: list[float], place: list[float]) -> bool:

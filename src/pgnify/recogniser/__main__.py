@@ -7,14 +7,16 @@ board is in; the piece on each of its 64 squares; and whether the board is print
 side. This calls upstream's get_fen, from the copy of its reading code in chess_diagram_to_fen/,
 with its release 1.0 weights, and also returns what get_fen leaves out: how sure the position
 model is of each square and its second choice, where the board is in the picture, and whether
-the picture shows the board from Black's side.
+the picture shows the board from Black's side, and the orientation model's score for it:
+upstream calls a board printed from Black's side where the score is above 0.7.
 
 It reads one request a line on stdin, {"picture": PATH}, or {"picture": PATH, "box": [x0, y0,
 x1, y1]} to read only that part of the picture, in its pixels, cut to its edges. For each, in
 order, it writes one line of JSON to stdout: the placement, from White's side; the board's box
-in the whole picture; whether the board is printed from Black's side; and for each square from
-a1 to h8, the piece it holds in FEN's letters ("" for none), how sure the model is, and its
-second choice. A picture in which it reads no board gives {"failure": REASON}.
+in the whole picture; whether the board is printed from Black's side; the orientation model's
+score; and for each square from a1 to h8, the piece it holds in FEN's letters ("" for none), how
+sure the model is, and its second choice. A picture in which it reads no board gives
+{"failure": REASON}.
 
 {"picture": PATH, "find": true} asks for the places on a page's picture where a board may be,
 as frames.py finds them, each read as a box is, but for a place a board read before it covers:
@@ -132,7 +134,15 @@ def _part(box: list, size: tuple[int, int]) -> tuple[int, int, int, int]:
 def read(picture, models) -> dict:
     from pgnify.recogniser.chess_diagram_to_fen.reading import get_fen
 
-    result = get_fen(picture, models, auto_rotate_image=True, auto_rotate_board=True)
+    # get_fen thresholds the orientation model's score and drops it.
+    scores: list[float] = []
+    hook = models.orientation.register_forward_hook(
+        lambda _module, _input, output: scores.append(float(output.squeeze()))
+    )
+    try:
+        result = get_fen(picture, models, auto_rotate_image=True, auto_rotate_board=True)
+    finally:
+        hook.remove()
     if result is None:
         return {"failure": "no board found"}
     if result.corners_px is None:
@@ -153,7 +163,13 @@ def read(picture, models) -> dict:
     placement = _placement(squares)
     assert placement == result.fen.split()[0], f"the scores read {placement}, get_fen {result.fen}"
     board, flipped = _board(result, turned)
-    return {"placement": placement, "squares": squares, "board": board, "flipped": flipped}
+    return {
+        "placement": placement,
+        "squares": squares,
+        "board": board,
+        "flipped": flipped,
+        "orientation": round(scores[-1], 3),
+    }
 
 
 def _square(raw) -> list:

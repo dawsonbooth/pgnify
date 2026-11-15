@@ -1,9 +1,12 @@
 """The live tests need the diagrams extra and the reader's weights: `just models`, or a checkout's
 models/."""
 
+import itertools
 from collections.abc import Callable
 from pathlib import Path
 
+import chess
+import chess.svg
 import pymupdf
 import pytest
 from support import (
@@ -354,3 +357,199 @@ def test_doc_text_with_ocr_leaves_the_boards_out_of_its_reading(tmp_path: Path) 
     assert len(page["boards_left_out"]) == 2
     assert page["text"].startswith("Exercises\n")
     assert PROSE in page["text"]
+
+
+# An ending the orientation model takes for a board printed from Black's side, with a score of
+# 0.79, though it is printed from White's; and one it doubts, with a score of 0.37.
+MISREAD = "8/1K6/5R2/8/8/2P5/4P3/1k6"
+DOUBTED = "8/8/4k3/5P2/8/2bB4/8/k7"
+# One the model reads right, as printed from White's side, with a score of 0.52; turned round it
+# is not a position, since both kings are in check.
+UNSURE = "8/2Q2q2/6K1/8/8/5B2/5P2/6k1"
+
+
+def _printed(
+    placement: str, path: Path, coordinates: bool = True, side: chess.Color = chess.WHITE
+) -> None:
+    """Draw a position from the side given, with or without the files and ranks printed."""
+    board = chess.Board(f"{placement} w - - 0 1")
+    svg = chess.svg.board(board, size=400, coordinates=coordinates, orientation=side)
+    with pymupdf.open("svg", svg.encode()) as doc:
+        doc[0].get_pixmap().save(str(path))
+
+
+@pytest.mark.live
+@needs_tesseract
+def test_read_diagram_takes_the_side_a_board_is_printed_from_by_the_letters_under_it(
+    tmp_path: Path,
+) -> None:
+    picture = tmp_path / "white.png"
+    _printed(MISREAD, picture)
+    reading = read_diagram(str(picture))
+    assert reading["placement"] == MISREAD
+    assert reading["flipped"] is False
+    assert reading["orientation_doubt"] is None
+
+
+@pytest.mark.live
+def test_read_diagram_reports_the_orientation_doubtful_where_no_letters_settle_it(
+    tmp_path: Path,
+) -> None:
+    misread, doubted, clear = (tmp_path / name for name in ("misread.png", "doubted.png", "a.png"))
+    _printed(MISREAD, misread, coordinates=False)
+    _printed(DOUBTED, doubted, coordinates=False)
+    _printed(SKEWER.split()[0], clear, coordinates=False)
+    # The net's call stands, with its score: here a wrong one, which only the letters correct.
+    reading = read_diagram(str(misread))
+    assert reading["flipped"] is True
+    assert reading["orientation_doubt"] == pytest.approx(0.79, abs=0.05)
+    assert read_diagram(str(doubted))["orientation_doubt"] == pytest.approx(0.37, abs=0.05)
+    assert read_diagram(str(clear))["orientation_doubt"] is None
+
+
+def _letters_read(monkeypatch: pytest.MonkeyPatch, letters: str) -> list[str]:
+    """Make Tesseract read these letters, one to a file, for every board; the list it fills
+    holds what it was asked to read."""
+    asked: list[str] = []
+    reads = itertools.cycle(letters)
+
+    def read_character(picture: bytes, characters: str) -> str:
+        asked.append(characters)
+        return next(reads)
+
+    monkeypatch.setattr(tesseract, "read_character", read_character)
+    return asked
+
+
+@pytest.mark.live
+@pytest.mark.parametrize(
+    ("letters", "turned"),
+    [("abcdefgh", True), ("abcxxxxx", True), ("abxxxxxx", False), ("hgfedcba", False)],
+)
+def test_the_letters_turn_a_board_the_model_calls_from_blacks_side_only_by_a_margin_of_three(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, letters: str, turned: bool
+) -> None:
+    picture = tmp_path / "board.png"
+    _printed(MISREAD, picture, coordinates=False)
+    _letters_read(monkeypatch, letters)
+    reading = read_diagram(str(picture))
+    assert reading["placement"] == (MISREAD if turned else MISREAD[::-1])
+    assert reading["flipped"] is not turned
+    expected = None if turned or letters == "hgfedcba" else pytest.approx(0.79, abs=0.05)
+    assert reading["orientation_doubt"] == expected
+
+
+@pytest.mark.live
+def test_the_letters_turn_a_board_the_model_calls_from_whites_side_and_problems_follow(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    picture = tmp_path / "board.png"
+    _printed(UNSURE, picture, coordinates=False)
+    _letters_read(monkeypatch, "abcdefgh")
+    agreed = read_diagram(str(picture))
+    assert (agreed["placement"], agreed["flipped"]) == (UNSURE, False)
+    assert agreed["orientation_doubt"] is None and agreed["problems"] == []
+    _letters_read(monkeypatch, "hgfedcba")
+    turned = read_diagram(str(picture))
+    assert (turned["placement"], turned["flipped"]) == (UNSURE[::-1], True)
+    assert turned["orientation_doubt"] is None
+    assert turned["problems"] == problems(UNSURE[::-1]) == ["opposite_check"]
+
+
+@pytest.mark.live
+def test_the_letters_turn_the_squares_of_a_doubt_with_the_board(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    picture = tmp_path / "board.png"
+    svg = chess.svg.board(chess.Board(f"{UNSURE} w - - 0 1"), size=400, coordinates=False)
+    with pymupdf.open("svg", svg.encode()) as doc:
+        pixels = doc[0].get_pixmap()
+    # Grey over most of the queen on c7, which the reader then doubts.
+    pixels.set_rect(pymupdf.IRect(110, 60, 140, 95), (140, 140, 140))
+    pixels.save(str(picture))
+    _letters_read(monkeypatch, "abcdefgh")
+    [doubt] = read_diagram(str(picture))["doubts"]
+    assert (doubt["square"], doubt["piece"]) == ("c7", "Q")
+    _letters_read(monkeypatch, "hgfedcba")
+    [doubt] = read_diagram(str(picture))["doubts"]
+    assert (doubt["square"], doubt["piece"]) == ("f2", "Q")
+
+
+@pytest.mark.live
+def test_the_letters_are_not_read_where_the_model_is_sure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    picture = tmp_path / "board.png"
+    _printed(SKEWER.split()[0], picture, coordinates=False)
+    asked = _letters_read(monkeypatch, "hgfedcba")
+    reading = read_diagram(str(picture))
+    assert reading["placement"] == SKEWER.split()[0] and reading["flipped"] is False
+    assert reading["orientation_doubt"] is None
+    assert asked == []
+
+
+def _page(
+    folder: Path, placement: str, under: str, letters: bool = False, above: bool = False
+) -> Path:
+    """A one-page PDF of a framed board of the placement, with the text under it: its file
+    letters, if letters, one to a file, or a caption; and the letters above it, if above."""
+    picture = folder / "board.png"
+    _printed(placement, picture, coordinates=False)
+    doc = pymupdf.open()
+    page = doc.new_page(width=460, height=400)
+    box = pymupdf.Rect(100, 100, 300, 300)
+    page.insert_image(box, filename=str(picture))
+    page.draw_rect(box, color=(0, 0, 0), width=1.5)
+    for index, letter in enumerate("abcdefgh"):
+        x = box.x0 + (index + 0.5) * box.width / 8 - 3
+        if above:
+            page.insert_text((x, box.y0 - 8), letter, fontsize=11)
+        if letters:
+            page.insert_text((x, box.y1 + 16), letter, fontsize=11)
+    if not letters:
+        page.insert_text((110, box.y1 + 20), under, fontsize=12)
+    path = folder / "page.pdf"
+    doc.save(path)
+    return path
+
+
+@pytest.mark.live
+@needs_tesseract
+def test_read_page_takes_the_side_a_board_is_printed_from_by_the_letters_under_it(
+    tmp_path: Path,
+) -> None:
+    path = _page(tmp_path, MISREAD, "", letters=True)
+    [board] = read_page(str(path), 1, str(tmp_path / "shown"))["boards"]
+    assert (board["placement"], board["flipped"], board["orientation_doubt"]) == (
+        MISREAD,
+        False,
+        None,
+    )
+
+
+@pytest.mark.live
+@needs_tesseract
+def test_read_page_leaves_a_board_as_it_was_read_where_a_caption_stands_under_it(
+    tmp_path: Path,
+) -> None:
+    caption = "TEST 136. Black to play."
+    sure = _page(tmp_path, SKEWER.split()[0], caption)
+    [board] = read_page(str(sure), 1, str(tmp_path / "shown"))["boards"]
+    assert (board["placement"], board["flipped"]) == (SKEWER.split()[0], False)
+    assert board["orientation_doubt"] is None
+    # Where the model is unsure the caption is read, and decides nothing.
+    unsure = _page(tmp_path, MISREAD, caption)
+    [board] = read_page(str(unsure), 1, str(tmp_path / "shown"))["boards"]
+    assert (board["placement"], board["flipped"]) == (MISREAD[::-1], True)
+    assert board["orientation_doubt"] == pytest.approx(0.79, abs=0.05)
+
+
+@pytest.mark.live
+@needs_tesseract
+def test_the_letters_above_a_board_do_not_decide_the_side_it_is_printed_from(
+    tmp_path: Path,
+) -> None:
+    path = _page(tmp_path, MISREAD, "", above=True)
+    [board] = read_page(str(path), 1, str(tmp_path / "shown"))["boards"]
+    assert (board["placement"], board["flipped"]) == (MISREAD[::-1], True)
+    assert board["orientation_doubt"] == pytest.approx(0.79, abs=0.05)
