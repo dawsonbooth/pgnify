@@ -1,8 +1,10 @@
 """Score runs against their slice's truth (experiments/slices.toml), from each run's
 output PGN alone, and list every fault, for review against the run's final answer.
 
-- Games: a game that starts where the game before it ends, as an analysis that goes on from a
-  diagram at a line's end, is read joined on to that game, in the truth and the run alike, and
+- Games: a game that starts where an earlier game's main line ends, as an analysis that goes
+  on from a diagram at a line's end, with moves or without, is read joined on to that game
+  (the nearest such, past games that start inside its tree and not past one that does not),
+  taking the game's Result where that game's is "*", in the truth and the run alike, and
   so is a game of text alone that follows another from the same position with the same headers
   (a Round aside), as prose of one section that one game or two may hold. Each truth game is
   paired with the run's game that starts from its placement, squares the truth marks uncertain
@@ -1182,10 +1184,15 @@ def _pair(
 
 
 def _joined(games: Sequence[chess.pgn.Game]) -> tuple[list[chess.pgn.Game], list[int]]:
-    """The games with each one that starts where the game before it ends joined on to it: its
-    comment after that game's last move, its moves after them. A book that shows a diagram at
-    a line's end and goes on with the analysis from it may be given as one game or two; truth
-    and run alike are read joined, so that the two count the same. So too a game of text alone
+    """The games with each one that starts where an earlier game's main line ends joined on to
+    that game, with or without moves: its comment after the last main-line move, its moves, if
+    any, after them. A book that shows a diagram at a line's end and goes on with the analysis
+    from it may be given as one game or two, and another game, as a variation's passage, may sit
+    between them; truth and run alike are read joined, so that the two count the same. The
+    game joined to is the nearest whose main line ends at that start, and only if every game
+    between them starts from a position in its tree, as joined so far: a later exercise that
+    happens to start where an earlier example ended stays apart. The joined game's Result
+    stands in for the game's where that is "*". So too a game of text alone
     after another from the same position with the same headers, a Round a run numbers aside:
     prose that runs on in one section, one game or two. With each game, how many it joins."""
     joined: list[chess.pgn.Game] = []
@@ -1195,29 +1202,44 @@ def _joined(games: Sequence[chess.pgn.Game]) -> tuple[list[chess.pgn.Game], list
             joined
             and not joined[-1].variations
             and not game.variations
-            and (joined[-1].board().board_fen(), joined[-1].board().turn)
-            == (game.board().board_fen(), game.board().turn)
+            and _start(joined[-1]) == _start(game)
             and _section(joined[-1]) == _section(game)
         ):
             joined[-1].comment = "\n".join(t for t in (joined[-1].comment, game.comment) if t)
             parts[-1] += 1
             continue
-        last = joined[-1].end() if joined else None
-        if (
-            last is not None
-            and isinstance(last, chess.pgn.ChildNode)
-            and game.variations
-            and (last.board().board_fen(), last.board().turn)
-            == (game.board().board_fen(), game.board().turn)
-        ):
+        index = _continued(joined, _start(game))
+        if index is not None:
+            last = joined[index].end()
             last.comment = "\n".join(text for text in (last.comment, game.comment) if text)
             _graft(game, last)
-            parts[-1] += 1
+            if joined[index].headers.get("Result", "*") == "*":
+                joined[index].headers["Result"] = game.headers.get("Result", "*")
+            parts[index] += 1
             continue
         # Joined on copies: the caller's games stay as they were.
         joined.append(copy.deepcopy(game))
         parts.append(1)
     return joined, parts
+
+
+def _start(node: chess.pgn.GameNode) -> tuple[str, bool]:
+    """A position's placement and the side to move: a game's start, or a node's."""
+    board = node.board()
+    return board.board_fen(), board.turn
+
+
+def _continued(joined: Sequence[chess.pgn.Game], start: tuple[str, bool]) -> int | None:
+    """The index of the nearest game whose main line, of at least a move, ends at the start, if
+    each game after it starts from a position in its tree; else None."""
+    for index in range(len(joined) - 1, -1, -1):
+        last = joined[index].end()
+        if isinstance(last, chess.pgn.ChildNode) and _start(last) == start:
+            positions = {_start(node) for node in nodes(joined[index])}
+            if all(_start(later) in positions for later in joined[index + 1 :]):
+                return index
+            return None
+    return None
 
 
 def _section(game: chess.pgn.Game) -> dict[str, str]:
