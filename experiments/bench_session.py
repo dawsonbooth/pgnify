@@ -169,7 +169,11 @@ FAILURES = [
     ),
     (
         "usage_limit",
-        re.compile(r"usage limit|hit your [a-z ]*limit|limit reached|out of (extra )?usage", re.I),
+        re.compile(
+            r"usage limit|hit your [a-z ]*limit|reached your [a-z0-9. ]*limit|limit reached"
+            r"|out of (extra )?usage|requires usage credits",
+            re.I,
+        ),
     ),
     ("rate_limited", re.compile(r"rate_limit_error|\b429\b|rate limit", re.I)),
     (
@@ -515,6 +519,29 @@ def credential_failures(answers: dict[str, Any], base_url: str | None) -> list[s
     return failures
 
 
+def catalog_failures(catalog: list[dict], model: str) -> list[str]:
+    """Why the model is not one the session may use, from the models of the initialize answer.
+    MODELS guards the ID itself. This refuses an ID with no row resolving to it but Claude Code's
+    fallback for an ID it cannot name ("Custom model"), and a row that says the model needs usage
+    credits, beyond the subscription. A row may list the model under an alias or under its own
+    ID, as a Fable session's row does. The credits test is best effort: the suffix follows the
+    account's usage-credit settings as Claude Code has loaded them when it answers. A
+    claude-fable- ID it cannot name (claude-fable-5-9) gets the current Fable's row, and a known
+    ID with a suffix (claude-sonnet-5-5-x) is named by its family; MODELS refuses both before
+    the preflight."""
+    rows = [
+        m
+        for m in catalog
+        if m.get("resolvedModel") == model
+        and not (m.get("description") or "").startswith("Custom model")
+    ]
+    if not rows:
+        return [f"{model} is not a model Claude Code offers"]
+    if any("Requires usage credits" in (m.get("description") or "") for m in rows):
+        return [f"{model} requires usage credits, beyond the subscription"]
+    return []
+
+
 def preflight(
     command: list[str], env: dict, cwd: str, folder: Path, expected: dict
 ) -> dict[str, Any]:
@@ -530,6 +557,7 @@ def preflight(
     }
     answers = control(command, env, cwd, wait_for_servers=True)
     init, settings = answers["initialize"], answers["get_settings"]
+    catalog = init.get("models") or []
     status_rows = rows(answers["get_status"])
     servers = answers["mcp_status"].get("mcpServers") or []
     failures = [f"{subtype}: {a['error']}" for subtype, a in answers.items() if a.get("error")]
@@ -543,14 +571,7 @@ def preflight(
         need(address == expected["base_url"], f"the API's address is {address}, not Ollama's")
     else:
         failures += credential_failures(answers, expected["base_url"])
-        # A model of Claude Code's own catalog is listed under an alias; one it does not know,
-        # under its own name alone.
-        catalog = {
-            m.get("resolvedModel")
-            for m in init.get("models") or []
-            if m.get("value") != m.get("resolvedModel")
-        }
-        need(expected["model"] in catalog, f"{expected['model']} is not a model Claude Code offers")
+        failures += catalog_failures(catalog, expected["model"])
     applied = settings.get("applied") or {}
     need(applied.get("model") == expected["model"], f"the model is {applied.get('model')!r}")
     if not expected["local"]:
@@ -593,6 +614,19 @@ def preflight(
         "status": status_rows,
         "settings": settings,
         "mcp_servers": servers,
+        "catalog": [
+            {
+                key: m.get(key)
+                for key in (
+                    "value",
+                    "resolvedModel",
+                    "displayName",
+                    "description",
+                    "supportedEffortLevels",
+                )
+            }
+            for m in catalog
+        ],
         "skill_loaded": client_session.SKILL in commands,
         "failures": failures,
     }
@@ -823,7 +857,8 @@ def _stream_failure(lines: list[str], expected: dict) -> tuple[str, str] | None:
 
 def overage_failure(event: dict) -> str | None:
     """Why a rate_limit_event leaves usage beyond the plan possible: its overageStatus is present
-    and not 'rejected', or isUsingOverage is true. None for any other event, or one with neither."""
+    and not 'rejected', or isUsingOverage or overageInUse is true. None for any other event, or
+    one with none of them."""
     if event.get("type") != "rate_limit_event":
         return None
     info = event.get("rate_limit_info")
@@ -832,7 +867,7 @@ def overage_failure(event: dict) -> str | None:
     status = info.get("overageStatus")
     if status is not None and status != "rejected":
         return f"overage is {status!r}, not rejected"
-    if info.get("isUsingOverage"):
+    if info.get("isUsingOverage") or info.get("overageInUse"):
         return "usage beyond the plan is in use"
     return None
 

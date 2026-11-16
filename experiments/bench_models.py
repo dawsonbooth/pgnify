@@ -15,7 +15,7 @@ any file that holds it is redacted.
 Writes experiments/results/bench/models/<timestamp>.json and its folder, with the overage fields
 each request's stream reported. Exits 2 when a check fails: a wrong credential, an authentication
 failure not named, a model that answers as another, an error, or overage_possible (a rate limit
-report whose overageStatus is not "rejected", or whose isUsingOverage is true).
+report whose overageStatus is not "rejected", or whose isUsingOverage or overageInUse is true).
 """
 
 import json
@@ -108,7 +108,7 @@ def ask(model: str, token: str, folder: Path) -> dict[str, Any]:
     seen = [
         {
             k: (e.get("rate_limit_info") or {}).get(k)
-            for k in ("overageStatus", "isUsingOverage", "overageDisabledReason")
+            for k in ("overageStatus", "isUsingOverage", "overageInUse", "overageDisabledReason")
         }
         for e in reports
     ]
