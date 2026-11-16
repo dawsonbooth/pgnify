@@ -10,7 +10,9 @@ other end stops the invocation with that code, and says which plans were not run
 
 The plan names the slice, the budget, the part of it held back, the models to check first, and
 the runs in order; a run takes its map from, or reviews, an earlier run of the plan by name,
-or takes a map file (map_file, from the repository's root, as C-verified does):
+or takes a map file (map_file, from the repository's root, as C-verified does), or reviews the
+run folder of an earlier batch (review_of_folder, from the repository's root, under the slice's
+folder in experiments/results/bench/, with PGN in its work/ folder, in place of review_of):
 
     slice = "london12"
     budget_usd = 10.0
@@ -32,6 +34,14 @@ or takes a map file (map_file, from the repository's root, as C-verified does):
     effort = "high"
     ceiling_usd = 0.5
     map = "C-map"
+
+    [[run]]
+    name = "R-earlier"
+    workflow = "R"
+    model = "claude-opus-5-5"
+    effort = "high"
+    ceiling_usd = 1.0
+    review_of_folder = "experiments/results/bench/london12/A/claude-sonnet-5-5-high/20261112T172717"
 
 Refuses a plan whose slice's reference is not frozen (its digests beside it, matching), or whose
 scorer differs from the fingerprint the plan gives. Asks for the token `claude setup-token` printed,
@@ -215,6 +225,8 @@ def run_plan(plan_path: Path, plan: dict[str, Any], token: Token, parsed_sha256:
             "model": run["model"],
             "effort": run["effort"],
         }
+        if "review_of_folder" in run:
+            entry["review_of_folder"] = str((ROOT / run["review_of_folder"]).resolve())
         record["runs"].append(entry)
         arguments = [run["workflow"], "--model", run["model"], "--effort", run["effort"]]
         if "map" in run:
@@ -231,6 +243,8 @@ def run_plan(plan_path: Path, plan: dict[str, Any], token: Token, parsed_sha256:
                 entry["status"] = f"skipped: {run['review_of']} wrote no PGN"
                 continue
             arguments += ["--review-of", str(given)]
+        if "review_of_folder" in run:
+            arguments += ["--review-of", entry["review_of_folder"]]
         if "subagent_model" in run:
             arguments += ["--subagent-model", run["subagent_model"]]
         if "label" in run:
@@ -323,6 +337,7 @@ def check_plan(plan: dict[str, Any]) -> list[str]:
         for key in ("map", "review_of"):
             if key in run and run[key] not in names:
                 problems.append(f"{run.get('name')}: {key} names no earlier run, {run[key]!r}")
+        problems += review_folder(plan, run)
         if run.get("name") in names:
             problems.append(f"two runs are named {run.get('name')!r}")
         names.add(run.get("name"))
@@ -335,6 +350,31 @@ def check_plan(plan: dict[str, Any]) -> list[str]:
             f"the scorer is {score_slice.fingerprint()}, not the {plan['scorer']} the plan froze"
         )
     return problems
+
+
+def review_folder(plan: dict[str, Any], run: dict[str, Any]) -> list[str]:
+    """What is wrong with a run's review_of_folder, if it gives one: given beside review_of, on a
+    workflow other than R, an absolute path, not a folder under the slice's in
+    experiments/results/bench/, or without PGN in its work/ folder."""
+    if "review_of_folder" not in run:
+        return []
+    name, given = run.get("name"), run["review_of_folder"]
+    if "review_of" in run:
+        return [f"{name}: review_of and review_of_folder are both given"]
+    if run.get("workflow") != "R":
+        return [f"{name}: review_of_folder is for a review (R), not {run.get('workflow')!r}"]
+    if not isinstance(given, str):
+        return [f"{name}: review_of_folder must be a path from the repository's root"]
+    if Path(given).is_absolute():
+        return [f"{name}: review_of_folder {given!r} must be relative to the repository's root"]
+    folder = (ROOT / given).resolve()
+    if not folder.is_relative_to((bench_session.RESULTS / str(plan.get("slice"))).resolve()):
+        return [f"{name}: review_of_folder {given!r} is not under the slice's results folder"]
+    if not folder.is_dir():
+        return [f"{name}: review_of_folder {given!r} is not a folder"]
+    if not list((folder / "work").glob("*.pgn")):
+        return [f"{name}: review_of_folder {given!r} has no work/*.pgn"]
+    return []
 
 
 def frozen(truth: str) -> list[str]:
