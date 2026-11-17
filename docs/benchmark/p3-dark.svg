@@ -1,0 +1,182 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="804" height="706" viewBox="0 0 804 706" role="img" aria-labelledby="t d">
+<title id="t">P3: substantive faults against cost, per configuration</title>
+<desc id="d">Nine small panels, one per configuration on P3 (Silman, Complete Endgame Course, Part Four). In each panel, every run is a dot. Its position gives the run's cost at list price (log scale, $2 to $16) and its substantive faults (0 to 100). A gray band shows Sonnet 5.5 at high effort's three runs, 41 to 72 faults. Opus 5.5 at high effort's third run, 705 faults, appears at the top edge. The figures are in the tables of docs/benchmark.md.</desc>
+<rect width="804" height="706" fill="#1a1a19"/>
+<g font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif">
+<text x="44" y="28" font-size="15" font-weight="600" fill="#f0efec">P3: substantive faults against cost, per configuration</text>
+<text x="44" y="50" font-size="12" fill="#c3c2b7">The gray band spans Sonnet 5.5 at high effort's three runs (41–72 faults); gray dots mark those runs. Lower is better.</text>
+<text x="44" y="68" font-size="12" fill="#c3c2b7">Three runs differ from the band only if all three fall on one side of it. One run cannot show a difference.</text>
+<text x="44" y="86" font-size="12" fill="#c3c2b7">B, C and D: Sonnet 5.5 at high with a survey, another session's map, or delegation to subagents.</text>
+<text x="44" y="104" font-size="12" fill="#c3c2b7">C-verified's map came from the reference PGN.</text>
+<text x="44" y="140" font-size="12" font-weight="600" fill="#f0efec">Sonnet 5.5, medium</text>
+<line x1="44" x2="264" y1="282.0" y2="282.0" stroke="#383835" stroke-width="1"/>
+<text x="36" y="286.0" font-size="11" text-anchor="end" fill="#898781">0</text>
+<line x1="44" x2="264" y1="216.0" y2="216.0" stroke="#2c2c2a" stroke-width="1"/>
+<text x="36" y="220.0" font-size="11" text-anchor="end" fill="#898781">50</text>
+<line x1="44" x2="264" y1="150.0" y2="150.0" stroke="#2c2c2a" stroke-width="1"/>
+<text x="36" y="154.0" font-size="11" text-anchor="end" fill="#898781">100</text>
+<line x1="44.0" x2="44.0" y1="150" y2="282" stroke="#2c2c2a" stroke-width="1"/>
+<text x="44.0" y="298" font-size="11" text-anchor="middle" fill="#898781">$2</text>
+<line x1="117.33333333333334" x2="117.33333333333334" y1="150" y2="282" stroke="#2c2c2a" stroke-width="1"/>
+<text x="117.33333333333334" y="298" font-size="11" text-anchor="middle" fill="#898781">$4</text>
+<line x1="190.66666666666666" x2="190.66666666666666" y1="150" y2="282" stroke="#2c2c2a" stroke-width="1"/>
+<text x="190.66666666666666" y="298" font-size="11" text-anchor="middle" fill="#898781">$8</text>
+<line x1="264.0" x2="264.0" y1="150" y2="282" stroke="#2c2c2a" stroke-width="1"/>
+<text x="264.0" y="298" font-size="11" text-anchor="middle" fill="#898781">$16</text>
+<rect x="44" y="186.96" width="220" height="40.91999999999999" fill="#898781" fill-opacity="0.16"/>
+<circle cx="106.6" cy="187.0" r="3" fill="#6e6d68"/>
+<circle cx="103.0" cy="227.9" r="3" fill="#6e6d68"/>
+<circle cx="102.4" cy="225.2" r="3" fill="#6e6d68"/>
+<circle cx="81.3" cy="234.5" r="4.5" fill="#3987e5" stroke="#1a1a19" stroke-width="2"/>
+<circle cx="101.5" cy="238.4" r="4.5" fill="#3987e5" stroke="#1a1a19" stroke-width="2"/>
+<circle cx="78.0" cy="209.4" r="4.5" fill="#3987e5" stroke="#1a1a19" stroke-width="2"/>
+<text x="300" y="140" font-size="12" font-weight="600" fill="#f0efec">Opus 5.5, high</text>
+<line x1="300" x2="520" y1="282.0" y2="282.0" stroke="#383835" stroke-width="1"/>
+<line x1="300" x2="520" y1="216.0" y2="216.0" stroke="#2c2c2a" stroke-width="1"/>
+<line x1="300" x2="520" y1="150.0" y2="150.0" stroke="#2c2c2a" stroke-width="1"/>
+<line x1="300.0" x2="300.0" y1="150" y2="282" stroke="#2c2c2a" stroke-width="1"/>
+<text x="300.0" y="298" font-size="11" text-anchor="middle" fill="#898781">$2</text>
+<line x1="373.33333333333337" x2="373.33333333333337" y1="150" y2="282" stroke="#2c2c2a" stroke-width="1"/>
+<text x="373.33333333333337" y="298" font-size="11" text-anchor="middle" fill="#898781">$4</text>
+<line x1="446.66666666666663" x2="446.66666666666663" y1="150" y2="282" stroke="#2c2c2a" stroke-width="1"/>
+<text x="446.66666666666663" y="298" font-size="11" text-anchor="middle" fill="#898781">$8</text>
+<line x1="520.0" x2="520.0" y1="150" y2="282" stroke="#2c2c2a" stroke-width="1"/>
+<text x="520.0" y="298" font-size="11" text-anchor="middle" fill="#898781">$16</text>
+<rect x="300" y="186.96" width="220" height="40.91999999999999" fill="#898781" fill-opacity="0.16"/>
+<circle cx="362.6" cy="187.0" r="3" fill="#6e6d68"/>
+<circle cx="359.0" cy="227.9" r="3" fill="#6e6d68"/>
+<circle cx="358.4" cy="225.2" r="3" fill="#6e6d68"/>
+<circle cx="430.1" cy="268.8" r="4.5" fill="#3987e5" stroke="#1a1a19" stroke-width="2"/>
+<circle cx="446.2" cy="208.1" r="4.5" fill="#3987e5" stroke="#1a1a19" stroke-width="2"/>
+<path d="M393.9,158.0 L399.9,149.0 L405.9,158.0 Z" fill="#3987e5" stroke="#1a1a19" stroke-width="2"/>
+<text x="409.9" y="158.0" font-size="11" fill="#c3c2b7">705, off the scale</text>
+<text x="556" y="140" font-size="12" font-weight="600" fill="#f0efec">Sonnet 5.5 high, then Opus 5.5 review</text>
+<line x1="556" x2="776" y1="282.0" y2="282.0" stroke="#383835" stroke-width="1"/>
+<line x1="556" x2="776" y1="216.0" y2="216.0" stroke="#2c2c2a" stroke-width="1"/>
+<line x1="556" x2="776" y1="150.0" y2="150.0" stroke="#2c2c2a" stroke-width="1"/>
+<line x1="556.0" x2="556.0" y1="150" y2="282" stroke="#2c2c2a" stroke-width="1"/>
+<text x="556.0" y="298" font-size="11" text-anchor="middle" fill="#898781">$2</text>
+<line x1="629.3333333333334" x2="629.3333333333334" y1="150" y2="282" stroke="#2c2c2a" stroke-width="1"/>
+<text x="629.3333333333334" y="298" font-size="11" text-anchor="middle" fill="#898781">$4</text>
+<line x1="702.6666666666666" x2="702.6666666666666" y1="150" y2="282" stroke="#2c2c2a" stroke-width="1"/>
+<text x="702.6666666666666" y="298" font-size="11" text-anchor="middle" fill="#898781">$8</text>
+<line x1="776.0" x2="776.0" y1="150" y2="282" stroke="#2c2c2a" stroke-width="1"/>
+<text x="776.0" y="298" font-size="11" text-anchor="middle" fill="#898781">$16</text>
+<rect x="556" y="186.96" width="220" height="40.91999999999999" fill="#898781" fill-opacity="0.16"/>
+<circle cx="618.6" cy="187.0" r="3" fill="#6e6d68"/>
+<circle cx="615.0" cy="227.9" r="3" fill="#6e6d68"/>
+<circle cx="614.4" cy="225.2" r="3" fill="#6e6d68"/>
+<circle cx="681.2" cy="194.9" r="4.5" fill="#3987e5" stroke="#1a1a19" stroke-width="2"/>
+<circle cx="687.6" cy="235.8" r="4.5" fill="#3987e5" stroke="#1a1a19" stroke-width="2"/>
+<circle cx="682.5" cy="227.9" r="4.5" fill="#3987e5" stroke="#1a1a19" stroke-width="2"/>
+<text x="44" y="330" font-size="12" font-weight="600" fill="#f0efec">Sonnet 5.5, max (one run)</text>
+<line x1="44" x2="264" y1="472.0" y2="472.0" stroke="#383835" stroke-width="1"/>
+<text x="36" y="476.0" font-size="11" text-anchor="end" fill="#898781">0</text>
+<line x1="44" x2="264" y1="406.0" y2="406.0" stroke="#2c2c2a" stroke-width="1"/>
+<text x="36" y="410.0" font-size="11" text-anchor="end" fill="#898781">50</text>
+<line x1="44" x2="264" y1="340.0" y2="340.0" stroke="#2c2c2a" stroke-width="1"/>
+<text x="36" y="344.0" font-size="11" text-anchor="end" fill="#898781">100</text>
+<line x1="44.0" x2="44.0" y1="340" y2="472" stroke="#2c2c2a" stroke-width="1"/>
+<text x="44.0" y="488" font-size="11" text-anchor="middle" fill="#898781">$2</text>
+<line x1="117.33333333333334" x2="117.33333333333334" y1="340" y2="472" stroke="#2c2c2a" stroke-width="1"/>
+<text x="117.33333333333334" y="488" font-size="11" text-anchor="middle" fill="#898781">$4</text>
+<line x1="190.66666666666666" x2="190.66666666666666" y1="340" y2="472" stroke="#2c2c2a" stroke-width="1"/>
+<text x="190.66666666666666" y="488" font-size="11" text-anchor="middle" fill="#898781">$8</text>
+<line x1="264.0" x2="264.0" y1="340" y2="472" stroke="#2c2c2a" stroke-width="1"/>
+<text x="264.0" y="488" font-size="11" text-anchor="middle" fill="#898781">$16</text>
+<rect x="44" y="376.96000000000004" width="220" height="40.91999999999996" fill="#898781" fill-opacity="0.16"/>
+<circle cx="106.6" cy="377.0" r="3" fill="#6e6d68"/>
+<circle cx="103.0" cy="417.9" r="3" fill="#6e6d68"/>
+<circle cx="102.4" cy="415.2" r="3" fill="#6e6d68"/>
+<circle cx="186.1" cy="439.0" r="4.5" fill="#3987e5" stroke="#1a1a19" stroke-width="2"/>
+<text x="300" y="330" font-size="12" font-weight="600" fill="#f0efec">Fable 5.1, high (one run)</text>
+<line x1="300" x2="520" y1="472.0" y2="472.0" stroke="#383835" stroke-width="1"/>
+<line x1="300" x2="520" y1="406.0" y2="406.0" stroke="#2c2c2a" stroke-width="1"/>
+<line x1="300" x2="520" y1="340.0" y2="340.0" stroke="#2c2c2a" stroke-width="1"/>
+<line x1="300.0" x2="300.0" y1="340" y2="472" stroke="#2c2c2a" stroke-width="1"/>
+<text x="300.0" y="488" font-size="11" text-anchor="middle" fill="#898781">$2</text>
+<line x1="373.33333333333337" x2="373.33333333333337" y1="340" y2="472" stroke="#2c2c2a" stroke-width="1"/>
+<text x="373.33333333333337" y="488" font-size="11" text-anchor="middle" fill="#898781">$4</text>
+<line x1="446.66666666666663" x2="446.66666666666663" y1="340" y2="472" stroke="#2c2c2a" stroke-width="1"/>
+<text x="446.66666666666663" y="488" font-size="11" text-anchor="middle" fill="#898781">$8</text>
+<line x1="520.0" x2="520.0" y1="340" y2="472" stroke="#2c2c2a" stroke-width="1"/>
+<text x="520.0" y="488" font-size="11" text-anchor="middle" fill="#898781">$16</text>
+<rect x="300" y="376.96000000000004" width="220" height="40.91999999999996" fill="#898781" fill-opacity="0.16"/>
+<circle cx="362.6" cy="377.0" r="3" fill="#6e6d68"/>
+<circle cx="359.0" cy="417.9" r="3" fill="#6e6d68"/>
+<circle cx="358.4" cy="415.2" r="3" fill="#6e6d68"/>
+<circle cx="491.7" cy="425.8" r="4.5" fill="#3987e5" stroke="#1a1a19" stroke-width="2"/>
+<text x="556" y="330" font-size="12" font-weight="600" fill="#f0efec">B, survey first (one run)</text>
+<line x1="556" x2="776" y1="472.0" y2="472.0" stroke="#383835" stroke-width="1"/>
+<line x1="556" x2="776" y1="406.0" y2="406.0" stroke="#2c2c2a" stroke-width="1"/>
+<line x1="556" x2="776" y1="340.0" y2="340.0" stroke="#2c2c2a" stroke-width="1"/>
+<line x1="556.0" x2="556.0" y1="340" y2="472" stroke="#2c2c2a" stroke-width="1"/>
+<text x="556.0" y="488" font-size="11" text-anchor="middle" fill="#898781">$2</text>
+<line x1="629.3333333333334" x2="629.3333333333334" y1="340" y2="472" stroke="#2c2c2a" stroke-width="1"/>
+<text x="629.3333333333334" y="488" font-size="11" text-anchor="middle" fill="#898781">$4</text>
+<line x1="702.6666666666666" x2="702.6666666666666" y1="340" y2="472" stroke="#2c2c2a" stroke-width="1"/>
+<text x="702.6666666666666" y="488" font-size="11" text-anchor="middle" fill="#898781">$8</text>
+<line x1="776.0" x2="776.0" y1="340" y2="472" stroke="#2c2c2a" stroke-width="1"/>
+<text x="776.0" y="488" font-size="11" text-anchor="middle" fill="#898781">$16</text>
+<rect x="556" y="376.96000000000004" width="220" height="40.91999999999996" fill="#898781" fill-opacity="0.16"/>
+<circle cx="618.6" cy="377.0" r="3" fill="#6e6d68"/>
+<circle cx="615.0" cy="417.9" r="3" fill="#6e6d68"/>
+<circle cx="614.4" cy="415.2" r="3" fill="#6e6d68"/>
+<circle cx="626.2" cy="406.0" r="4.5" fill="#3987e5" stroke="#1a1a19" stroke-width="2"/>
+<text x="44" y="520" font-size="12" font-weight="600" fill="#f0efec">C, Opus's map (one run)</text>
+<line x1="44" x2="264" y1="662.0" y2="662.0" stroke="#383835" stroke-width="1"/>
+<text x="36" y="666.0" font-size="11" text-anchor="end" fill="#898781">0</text>
+<line x1="44" x2="264" y1="596.0" y2="596.0" stroke="#2c2c2a" stroke-width="1"/>
+<text x="36" y="600.0" font-size="11" text-anchor="end" fill="#898781">50</text>
+<line x1="44" x2="264" y1="530.0" y2="530.0" stroke="#2c2c2a" stroke-width="1"/>
+<text x="36" y="534.0" font-size="11" text-anchor="end" fill="#898781">100</text>
+<line x1="44.0" x2="44.0" y1="530" y2="662" stroke="#2c2c2a" stroke-width="1"/>
+<text x="44.0" y="678" font-size="11" text-anchor="middle" fill="#898781">$2</text>
+<line x1="117.33333333333334" x2="117.33333333333334" y1="530" y2="662" stroke="#2c2c2a" stroke-width="1"/>
+<text x="117.33333333333334" y="678" font-size="11" text-anchor="middle" fill="#898781">$4</text>
+<line x1="190.66666666666666" x2="190.66666666666666" y1="530" y2="662" stroke="#2c2c2a" stroke-width="1"/>
+<text x="190.66666666666666" y="678" font-size="11" text-anchor="middle" fill="#898781">$8</text>
+<line x1="264.0" x2="264.0" y1="530" y2="662" stroke="#2c2c2a" stroke-width="1"/>
+<text x="264.0" y="678" font-size="11" text-anchor="middle" fill="#898781">$16</text>
+<rect x="44" y="566.96" width="220" height="40.91999999999996" fill="#898781" fill-opacity="0.16"/>
+<circle cx="106.6" cy="567.0" r="3" fill="#6e6d68"/>
+<circle cx="103.0" cy="607.9" r="3" fill="#6e6d68"/>
+<circle cx="102.4" cy="605.2" r="3" fill="#6e6d68"/>
+<circle cx="129.1" cy="551.1" r="4.5" fill="#3987e5" stroke="#1a1a19" stroke-width="2"/>
+<text x="300" y="520" font-size="12" font-weight="600" fill="#f0efec">C-verified (one run)</text>
+<line x1="300" x2="520" y1="662.0" y2="662.0" stroke="#383835" stroke-width="1"/>
+<line x1="300" x2="520" y1="596.0" y2="596.0" stroke="#2c2c2a" stroke-width="1"/>
+<line x1="300" x2="520" y1="530.0" y2="530.0" stroke="#2c2c2a" stroke-width="1"/>
+<line x1="300.0" x2="300.0" y1="530" y2="662" stroke="#2c2c2a" stroke-width="1"/>
+<text x="300.0" y="678" font-size="11" text-anchor="middle" fill="#898781">$2</text>
+<line x1="373.33333333333337" x2="373.33333333333337" y1="530" y2="662" stroke="#2c2c2a" stroke-width="1"/>
+<text x="373.33333333333337" y="678" font-size="11" text-anchor="middle" fill="#898781">$4</text>
+<line x1="446.66666666666663" x2="446.66666666666663" y1="530" y2="662" stroke="#2c2c2a" stroke-width="1"/>
+<text x="446.66666666666663" y="678" font-size="11" text-anchor="middle" fill="#898781">$8</text>
+<line x1="520.0" x2="520.0" y1="530" y2="662" stroke="#2c2c2a" stroke-width="1"/>
+<text x="520.0" y="678" font-size="11" text-anchor="middle" fill="#898781">$16</text>
+<rect x="300" y="566.96" width="220" height="40.91999999999996" fill="#898781" fill-opacity="0.16"/>
+<circle cx="362.6" cy="567.0" r="3" fill="#6e6d68"/>
+<circle cx="359.0" cy="607.9" r="3" fill="#6e6d68"/>
+<circle cx="358.4" cy="605.2" r="3" fill="#6e6d68"/>
+<circle cx="365.9" cy="548.5" r="4.5" fill="#3987e5" stroke="#1a1a19" stroke-width="2"/>
+<text x="556" y="520" font-size="12" font-weight="600" fill="#f0efec">D, delegation (one run)</text>
+<line x1="556" x2="776" y1="662.0" y2="662.0" stroke="#383835" stroke-width="1"/>
+<line x1="556" x2="776" y1="596.0" y2="596.0" stroke="#2c2c2a" stroke-width="1"/>
+<line x1="556" x2="776" y1="530.0" y2="530.0" stroke="#2c2c2a" stroke-width="1"/>
+<line x1="556.0" x2="556.0" y1="530" y2="662" stroke="#2c2c2a" stroke-width="1"/>
+<text x="556.0" y="678" font-size="11" text-anchor="middle" fill="#898781">$2</text>
+<line x1="629.3333333333334" x2="629.3333333333334" y1="530" y2="662" stroke="#2c2c2a" stroke-width="1"/>
+<text x="629.3333333333334" y="678" font-size="11" text-anchor="middle" fill="#898781">$4</text>
+<line x1="702.6666666666666" x2="702.6666666666666" y1="530" y2="662" stroke="#2c2c2a" stroke-width="1"/>
+<text x="702.6666666666666" y="678" font-size="11" text-anchor="middle" fill="#898781">$8</text>
+<line x1="776.0" x2="776.0" y1="530" y2="662" stroke="#2c2c2a" stroke-width="1"/>
+<text x="776.0" y="678" font-size="11" text-anchor="middle" fill="#898781">$16</text>
+<rect x="556" y="566.96" width="220" height="40.91999999999996" fill="#898781" fill-opacity="0.16"/>
+<circle cx="618.6" cy="567.0" r="3" fill="#6e6d68"/>
+<circle cx="615.0" cy="607.9" r="3" fill="#6e6d68"/>
+<circle cx="614.4" cy="605.2" r="3" fill="#6e6d68"/>
+<circle cx="726.4" cy="567.0" r="4.5" fill="#3987e5" stroke="#1a1a19" stroke-width="2"/>
+<text x="44" y="698" font-size="11" fill="#898781">Vertical: substantive faults. Horizontal: cost at list price, log scale. A review's cost includes the conversion it reviewed.</text>
+</g>
+</svg>

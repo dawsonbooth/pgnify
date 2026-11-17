@@ -96,6 +96,8 @@ pgnify supports a format when its tools give your assistant everything a convers
 
 Tried so far, with Claude Sonnet 5.5 in Claude Code: EPUBs, one of them whole; born-digital PDFs, whether their diagrams are set in a chess font or are pictures; and scanned PDFs, whether their text layer is a machine reading or they have none. Each kind of PDF was tried on part of a book, not yet on a whole one. The misses that recurred were the model's: letters in its comments where the book prints figurines, as a PDF's text layer may give them; a variation the book gives in its prose kept as words; and on scans, an evaluation mark read as its look-alike, ∓ for ⩱, and now and then a move read as another legal one.
 
+[The benchmark](docs/benchmark.md) compares Claude models, effort levels and workflows by faithfulness and cost on three book extracts. Sonnet 5.5 at medium effort was never measurably less faithful than at high effort, and cost less. No model, effort or workflow was reliably more faithful than Sonnet 5.5 at high effort. All left faults, so check the result.
+
 ### Assistants that see pictures, and those that read only text
 
 pgnify supports two kinds of assistant, and says which it has tried:
