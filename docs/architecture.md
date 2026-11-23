@@ -24,16 +24,29 @@ pgnify has no agent runner, model selection, provider integration, API keys, loc
 
 ### Boundaries
 
+Reading and writing are configured separately: with its flag, each is limited to one location and nothing is asked; without it, the person allows each book or folder.
+
 - `--books PATH` names one book, or a folder of books (PDF and EPUB) searched with its subfolders. The server reads nothing else, and fails at startup if the path does not exist.
 - Hidden files and folders are skipped, and a symbolic link counts as a book only when it leads to a PDF or EPUB in the folder that is not hidden.
 - The model names a book by its path within the folder. A name that starts with `/`, `\` or `~`, or with a drive, is refused without being repeated. A name otherwise matches a book exactly, or the one book whose name differs only in case, curly quotes or dashes, and a name not found makes the server look in the folder again, for a book added since it started.
-- `--out DIR` is the one place the server writes: the PGN files under plain file names, their notes, and its working folder, `.pgnify/`. It never writes through a symbolic link, and refuses an output folder whose `.pgnify/` is or holds one.
-- `write_pgn` replaces a PGN file only if it wrote that file in the same session from the same book, or if the model asks it to, and it never writes over a notes file pgnify did not write. Names are compared ignoring case, so that two names cannot reach one file.
-- Each book has a folder, `.pgnify/books/<key>/`, for the games saved from it, the pictures extracted from it and the pages shown from it, and the pieces its figurines were read as. The key is the book's name in lower-case letters, digits and dashes, then the first 12 hex digits of the SHA-256 of its name and contents, so that two copies of a book, or a link and its target, never share one.
-- Results give paths relative to the output folder, and error messages show `<books>`, `<out>` and `~` in place of the configured folders and the home folder, escaped forms included.
+- Without `--books`, the model names a book by its full path, absolute or starting with `~`, to a PDF or EPUB that exists. A relative path, a missing file or another kind of file is refused without a question. The first time a book is named, the server asks the person to allow reading it until the session ends, and remembers a yes by the book's real path, so that another path to the same file is not asked again. `book` may be left out when exactly one book has been allowed.
+- `--out DIR` is the one place the server writes: the PGN files, at the path the model gives within it, in folders it makes as needed, with their notes beside them; and its working folder, `.pgnify/`. A path is plain names separated by `/`, at most 255 characters, with no hidden, empty, `.` or `..` part. It never writes through a symbolic link, refuses a path with a link or a file where a folder should be, and refuses an output folder whose `.pgnify/` is or holds a link.
+- Without `--out`, `file` is required, as the full path of the PGN file, with `.pgn` added unless it is there. The file name follows the same plain names, and folder names may hold any character except control and formatting characters. The first time a folder is named, the server asks the person to allow writing PGN files in it and in the folders inside it until the session ends, and says that it will make the folder if it is missing. It remembers a yes by the folder's real path. A write is covered when its real folder is an allowed folder or inside one, so a link in an allowed folder that leads elsewhere is asked about by the real folder it leads to. Folders are made only after a yes and the other checks, and the PGN and notes files must not be links.
+- Only the person's answer in the client allows, never the model's. Only an accept with the box ticked allows. A decline, or an accept with the box unticked, refuses the path, and for a folder the folders inside it, for the rest of the session, even after a later yes for a folder above. A cancel refuses that call only. Every refusal leaves nothing read, written or made, and tells the model that the person did not allow it and to ask the person before naming another path.
+- Refused paths are compared in NFC form, and without case on macOS and Windows, so that another spelling is not asked again.
+- A path holding a Cc, Cf, Zl or Zp character is refused before any question, so that the model cannot add lines to the question. A question shows the real path first, and the path the model gave only after it, when it differs.
+- Without declared form elicitation, the error tells the model that the person should start `pgnify serve` with `--books` or `--out`. Claude Code's print mode (`claude -p`) cancelled pgnify's questions when we tried it, so pgnify refused the request.
+- `write_pgn` replaces a PGN file only if it wrote that file in the same session from the same book, or if the model asks it to, and it never writes over a notes file pgnify did not write. Without `--out`, a replace the model asks for also asks the person first, file by file, with the same answers. Without `--out`, a target inside pgnify's own folder is refused. Names are compared ignoring case, so that two names cannot reach one file.
+- The working folder is `.pgnify/` in the `--out` folder. Without `--out` it is pgnify's own folder, `~/.local/state/pgnify/`, with the same layout: `books/<key>/`, `log.jsonl` and `outputs.json`, the last keyed by each PGN file's full real path. A record and a log line are written under a lock on the folder, taken with `fcntl.flock` or, on Windows, `msvcrt.locking`, so that two sessions at once lose neither.
+- Each book has a folder, `books/<key>/` in the working folder, for the games saved from it, the pictures extracted from it and the pages shown from it, and the pieces its figurines were read as. The key is the book's name in lower-case letters, digits and dashes, then the first 12 hex digits of the SHA-256 of its name and contents. With `--books` the name is the book's path in the folder, so a link and its target get two folders; without it, the name is the real path with `~`, so they share one. Two copies never share. Without `--out`, saved games go in `games/<session>/`, since every such session shares the folder.
+- A picture's path is given relative to the output folder, or without `--out` to pgnify's own folder. A PGN file's path is given relative to the output folder, or without `--out` in full, with `~` for the home folder. Error messages show `<books>`, `<out>` and `~` in place of the configured folders and the home folder, escaped forms included. A folder the person allowed is shown in full, with `~` for the home folder.
 - The server makes no network connections.
 
 These are pgnify's own checks, not a sandbox: the server and its diagram reader run with the user's rights.
+
+### How the server asks
+
+The server asks with the MCP SDK's resolvers, which work with both protocol versions: up to 2025-11-25 by a request from server to client, and from 2026-07-28, which has no such request, by a result that asks for input and a retried call. A tool takes a parameter filled by a resolver, which stays out of the tool's input schema. The resolver only reads what the person has allowed and returns the form to ask, or a plain value when nothing needs asking; it has no side effects, since the SDK may run it more than once for a call. The tool then settles the answer once, in `permission.py`, and raises the refusal. The form has one box, ticked to begin with. `tests/test_permission.py` runs the tool calls that ask through the SDK's client in both.
 
 ### Tools
 
@@ -49,9 +62,9 @@ These are pgnify's own checks, not a sandbox: the server and its diagram reader 
 | `check_fen` | checks and completes a FEN |
 | `check_pgn` | checks PGN text: what python-chess reads, and what it drops |
 | `build_pgn` | builds a game from a structured spec, checking every move, and can save it by name |
-| `write_pgn` | writes saved games, or PGN text, to a file in the output folder, with the model's notes |
+| `write_pgn` | writes saved games, or PGN text, to a file in the output folder or a folder the person allowed, with the model's notes |
 
-The tools that read a book, and those that save or write games, take `book`, which may be left out when there is only one. `validate_moves`, and `build_pgn` without a name, need no book even when there are several.
+The tools that read a book, and those that save or write games, take `book`, which may be left out when there is only one, or, without `--books`, when exactly one has been allowed. `validate_moves`, and `build_pgn` without a name, need no book even when there are several.
 
 Some books print the pieces in their moves as pictures, figurines. `doc_text` marks each picture with an id, the same wherever the same picture appears, and the chess tools take a figurine by its id in a move and read its piece from legality across the moves given: the main line first, then each variation, each line up to its last figurine. A figurine stays open where legality cannot settle it, and the pieces read in a saved game carry over to the book's other games.
 
@@ -63,11 +76,11 @@ The tools' descriptions document their mechanics, such as how a spec is built an
 
 ### What the client is told
 
-The server's MCP instructions name the books, say that the server writes only into its output folder, and point to the prompt `convert`, which gives the conversion instructions after a request to convert part of a book.
+The server's MCP instructions list the books, or say that the person allows each; say where the server writes, its output folder or the folders the person allows; and point to the prompt `convert`, which gives the conversion instructions after a request to convert part of a book.
 
 ### The log
 
-`.pgnify/log.jsonl` records every tool call: the time, the tool, its arguments, shortened, the book, and a summary of its result or its error. The summary keeps each page shown, with its box and its picture's path, and what `pgnify report` reads: the pages read, the hits of each search, the pictures extracted, every diagram reading with its doubts and problems, every board found on a page with its reading but not the text beside it, whether `doc_text` read by OCR, and every build and write with its errors and the name it saved under. It holds none of the model's comments or notes, only their sizes, and no page text. `.pgnify/outputs.json` records the book each PGN file was written from, from which saved games, whether it has notes, and when.
+`log.jsonl` in the working folder records every tool call: the time, the tool, its arguments, shortened, the book, and a summary of its result or its error. The summary keeps each page shown, with its box and its picture's path, and what `pgnify report` reads: the pages read, the hits of each search, the pictures extracted, every diagram reading with its doubts and problems, every board found on a page with its reading but not the text beside it, whether `doc_text` read by OCR, and every build and write with its errors and the name it saved under. It holds none of the model's comments or notes, only their sizes, and no page text. `outputs.json` records the book each PGN file was written from, from which saved games, whether it has notes, and when.
 
 ## The conversion instructions
 
@@ -85,7 +98,7 @@ The plugin holds only the skill and registers no server, so users choose the boo
 
 ## Checking and reporting
 
-`pgnify check FILE.pgn [--book BOOK]` checks one PGN file, against its book when it is given. `pgnify report DIR [--images] [--coverage PAGES]` checks each PGN file in an output folder against the book `outputs.json` records for it, quotes the model's notes, adds for each book what the server's log shows across the PGN files written from it, and writes `report.md` and `report.json` into the folder. With `--images`, it also saves, for each doubtful game, the book's picture beside a drawing of the game's start.
+`pgnify check FILE.pgn [--book BOOK]` checks one PGN file, against its book when it is given. `pgnify report DIR [--images] [--coverage PAGES]` checks each PGN file at the top of an output folder, and each file in a subfolder that `outputs.json` records, against the book it records for it. The report also reads pgnify's own records and log, for files inside the folder; it takes tool errors outside the PGN files only from the folder's `.pgnify/` log, since pgnify's own log holds every session without `--out`. The report quotes the model's notes, adds for each book what the server's log shows across the PGN files written from it, and writes `report.md` and `report.json` into the folder. With `--images`, it also saves, for each doubtful game, the book's picture beside a drawing of the game's start.
 
 The findings are of four kinds, never mixed, and a fifth is given only when asked for.
 

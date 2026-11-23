@@ -17,7 +17,7 @@ import chess.pgn
 import chess.svg
 import pymupdf
 
-from pgnify.outputs import replace_json
+from pgnify.outputs import locked, replace_json
 
 _MOVE_NUMBER = re.compile(r"^\d+(\.*)$")
 _GLUED_MOVE_NUMBER = re.compile(r"^\d+(\.+)(\S+)$")
@@ -179,7 +179,11 @@ def read_figurines(figurines: str | None, besides: str | None = None) -> dict[st
     if not (figurines and Path(figurines).exists()):
         return {}
     read: dict[str, set[str]] = {}
-    for name, pieces in json.loads(Path(figurines).read_text(encoding="utf-8")).items():
+    # Under the file's lock, as on Windows a file cannot be replaced while another process reads
+    # it.
+    with locked(Path(figurines).with_name("lock")):
+        saved = json.loads(Path(figurines).read_text(encoding="utf-8"))
+    for name, pieces in saved.items():
         if name == besides:
             continue
         for picture, piece in pieces.items():
@@ -191,11 +195,14 @@ def _record_figurines(figurines: str, name: str, pieces: dict[str, str]) -> None
     """Record the piece each figurine was read as in the game saved as name, replacing what that
     game read before."""
     file = Path(figurines)
-    games = json.loads(file.read_text(encoding="utf-8")) if file.exists() else {}
-    if not pieces and name not in games:
-        return
-    games[name] = pieces
-    replace_json(file, games)
+    file.parent.mkdir(parents=True, exist_ok=True)
+    # Under the file's lock, so that two sessions on one book lose none of each other's readings.
+    with locked(file.with_name("lock")):
+        games = json.loads(file.read_text(encoding="utf-8")) if file.exists() else {}
+        if not pieces and name not in games:
+            return
+        games[name] = pieces
+        replace_json(file, games)
 
 
 def _given_pictures(text: str) -> str:
@@ -773,11 +780,12 @@ def write_pgn(
     games: list[str] | None = None,
     names: list[str] | None = None,
     store: str | None = None,
+    unsaved: str = "",
 ) -> dict[str, Any]:
     """Write games to the PGN file at path, a blank line between them, and check it as check_pgn
     does: either games, one PGN game per item, or names, games saved with build_pgn in the
     folder store, in order. An empty list, an empty game or a name not saved is refused with
-    ValueError, and the file is left as it was.
+    ValueError, and the file is left as it was; unsaved ends the error for a name not saved.
 
     Returns path; saved, how many games the file now holds; replaced, how many it held before;
     and check_pgn's ok, dropped and games.
@@ -790,7 +798,9 @@ def write_pgn(
         for name in names:
             if not (_GAME_NAME.fullmatch(name) and (where / f"{name}.pgn").is_file()):
                 saved = ", ".join(sorted(file.stem for file in where.glob("*.pgn"))) or "none"
-                raise ValueError(f"no game saved as {name!r}; the games saved are: {saved}")
+                raise ValueError(
+                    f"no game saved as {name!r}; the games saved are: {saved}{unsaved}"
+                )
         games = [(where / f"{name}.pgn").read_text(encoding="utf-8") for name in names]
     games = games or []
     out = Path(path).resolve()

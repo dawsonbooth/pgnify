@@ -24,7 +24,7 @@ from pgnify.chess_tools import check_pgn, nodes, ranges, read_games, render_boar
 from pgnify.coverage import SHORTEST, scope_pages
 from pgnify.coverage import coverage as book_coverage
 from pgnify.diagram_tools import problems
-from pgnify.outputs import read_notes, read_records
+from pgnify.outputs import own_folder, read_notes, read_records
 from pgnify.prose import BookProse, bare, book_prose, passages, sentences, shortened
 from pgnify.text_layer import SCANNED_PAGE, TextLayer, text_layer
 
@@ -166,19 +166,50 @@ def _layer(layer: TextLayer | None) -> dict[str, Any] | None:
     }
 
 
-def report(folder: Path, images: bool = False, coverage: str | None = None) -> dict[str, Any]:
-    """Report on an output folder of `pgnify serve`: check each PGN file against its book, then,
-    for each book, what the server's log shows across every session and every PGN file written
-    from it in the folder, and quote the model's account separately. Writes report.md and
-    report.json into the folder, and with images saves each doubtful game's diagram beside a
-    drawing of its position in report-images/. With coverage, "all" or pages such as 46-103, it
-    also gives for each book the text on those pages that no comment of its PGN files holds, as
-    possible omissions; pages need a folder of one book's PGN files."""
+def report(
+    folder: Path, images: bool = False, coverage: str | None = None, state: Path | None = None
+) -> dict[str, Any]:
+    """Report on the PGN files `pgnify serve` wrote in folder: check each at the top of the folder,
+    and each in a subfolder that the records name, against its book; for each book, what the logs
+    show across every session and PGN file written from it; and the model's account, quoted
+    apart. Writes report.md and report.json into the folder, and with images saves each doubtful
+    game's diagram beside a drawing of its position in report-images/. With coverage, "all" or
+    pages such as 46-103, it also gives for each book the text on those pages that no comment of
+    its PGN files holds, as possible omissions; pages need the PGN files of one book. state is
+    pgnify's own folder, ~/.local/state/pgnify/ by default."""
     pages = scope_pages(coverage) if coverage is not None else None
     folder = folder.resolve()
-    work = folder / ".pgnify"
-    records = read_records(work)
-    log = _log(work / "log.jsonl")
+    local = folder / ".pgnify"
+    kept = local.is_dir()
+    own = (state or own_folder()).resolve()
+    # The records are those in the folder's .pgnify/, if it has one, and those in pgnify's own
+    # folder for files at or inside the folder, by each file's full real path. They are kept by the
+    # file's path in the folder, and for a file in both, the later written wins.
+    records: dict[str, dict[str, Any]] = {}
+    sources = [(name, record) for name, record in read_records(local).items()] if kept else []
+    for key, record in read_records(own).items():
+        path = Path(key)
+        if path.is_absolute() and path.is_relative_to(folder):
+            sources.append((path.relative_to(folder).as_posix(), record))
+    for name, record in sources:
+        if name not in records or record.get("written", "") >= records[name].get("written", ""):
+            records[name] = record
+    # Every PGN file at the top of the folder, and each file in a subfolder that the records
+    # name: a subfolder is never walked, as it may hold any number of PGN files that are not
+    # pgnify's.
+    top = [path for path in folder.iterdir() if path.suffix.lower() == ".pgn" and path.is_file()]
+    in_folders = [
+        folder / name
+        for name in records
+        if "/" in name
+        and not Path(name).is_absolute()
+        and ".." not in Path(name).parts
+        and (folder / name).is_file()
+        and (folder / name).resolve().is_relative_to(folder)
+    ]
+    found = [(path, path.relative_to(folder).as_posix()) for path in [*top, *in_folders]]
+    local_log = _log(local / "log.jsonl") if kept else []
+    log = [*local_log, *_log(own / "log.jsonl")]
     prose_of: dict[Path, BookProse | None] = {}
     layer_of: dict[Path, TextLayer] = {}
     outputs = []
@@ -186,9 +217,9 @@ def report(folder: Path, images: bool = False, coverage: str | None = None) -> d
     names: dict[str, str] = {}
     paths: dict[str, Path | None] = {}
     written: dict[str, list[tuple[str, Sequence[chess.pgn.Game], list[dict[str, Any]]]]] = {}
-    for pgn in sorted(path for path in folder.iterdir() if path.suffix.lower() == ".pgn"):
-        record = records.get(pgn.name) or next(
-            (kept for name, kept in records.items() if name.casefold() == pgn.name.casefold()), {}
+    for pgn, name in sorted(found, key=lambda item: item[0].relative_to(folder).parts):
+        record = records.get(name) or next(
+            (kept for other, kept in records.items() if other.casefold() == name.casefold()), {}
         )
         book = Path(record["book_path"]) if record.get("book_path") else None
         book = book if book and book.is_file() else None
@@ -210,15 +241,17 @@ def report(folder: Path, images: bool = False, coverage: str | None = None) -> d
         if key:
             names[key] = record.get("book") or key
             paths[key] = paths.get(key) or book
-            written.setdefault(key, []).append((pgn.name, read_games(text), result["games"]))
+            written.setdefault(key, []).append((name, read_games(text), result["games"]))
         outputs.append(
             {
-                "file": pgn.name,
+                "file": name,
                 "book": record.get("book"),
                 "book_found": book is not None,
                 **result,
                 "text_layer": _layer(layer),
-                "images": _images(folder, pgn, entries, result["games"]) if images else [],
+                "images": _images(folder, [folder, own], pgn, entries, result["games"])
+                if images
+                else [],
                 "model_account": read_notes(pgn),
             }
         )
@@ -249,8 +282,14 @@ def report(folder: Path, images: bool = False, coverage: str | None = None) -> d
                 ),
             }
         )
+    # Tool errors that belong to no PGN file come only from the folder's .pgnify/ log, since
+    # pgnify's own log holds every session's calls, and its errors would belong to other
+    # conversions. A book's findings use both logs, so they cover its conversions written to other
+    # folders too.
     elsewhere = [
-        entry for entry in log if "error" in entry and not any(_of_book(entry, k) for k in written)
+        entry
+        for entry in local_log
+        if "error" in entry and not any(_of_book(entry, k) for k in written)
     ]
     reported = {
         "folder": str(folder),
@@ -957,7 +996,11 @@ def _pages(pages: list[int]) -> str:
 
 
 def _images(
-    folder: Path, pgn: Path, entries: list[dict[str, Any]], games: list[dict[str, Any]]
+    folder: Path,
+    pictures: list[Path],
+    pgn: Path,
+    entries: list[dict[str, Any]],
+    games: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """For each game whose position is marked uncertain or was read with doubts, the picture its
     position was read from, beside a drawing of the position, saved in report-images/."""
@@ -968,7 +1011,7 @@ def _images(
         if entry["result"]["ok"]
     ]
     shown = []
-    target = folder / "report-images" / pgn.stem
+    target = folder / "report-images" / pgn.relative_to(folder).with_suffix("")
     for game in games:
         # A diagram that is no position, kept in a Diagram tag, is drawn as the game's start.
         start = game.get("diagram") or game["start"]
@@ -988,8 +1031,16 @@ def _images(
             "position": position.relative_to(folder).as_posix(),
             "book": None,
         }
-        picture = (folder / source["image_path"]) if source else None
-        if source and picture and picture.is_file():
+        # The log gives a picture's path from the folder the server kept it in.
+        picture = next(
+            (
+                found
+                for base in pictures
+                if source and (found := base / source["image_path"]).is_file()
+            ),
+            None,
+        )
+        if source and picture:
             copied = target / f"game-{game['game']}-book{picture.suffix}"
             if source["found"]:
                 _cut(picture, source["board"], copied)

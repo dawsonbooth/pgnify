@@ -1,15 +1,18 @@
-"""The MCP server: pgnify's tools over stdio, for the books at one location and output in one
-folder (`pgnify serve --books PATH --out DIR`).
+"""The MCP server: pgnify's tools over stdio, for the books and the output folder that
+`pgnify serve --books PATH --out DIR` names, or, where either is left out, for those the person
+allows when the assistant first names them.
 
-Each tool is a plain function, served with its docstring as its description, except that the
-server supplies every file path itself: the document tools read only the books (books.py), by
-name, and the output tools write only the output folder (outputs.py), under plain file names.
+Each tool is a plain function, served with its docstring as its description. With --books and --out
+the server supplies every file path itself, and the model names books and files within those
+folders: the document tools read only the books (books.py), and the output tools write only the
+output folder (outputs.py). Without them the model gives full paths, and the person allows each
+through the client (permission.py).
 The model names no path but a picture's, as doc_images and doc_page return it and read_diagram
 takes it.
 
 The server runs calls one at a time, since PyMuPDF is not thread-safe and a model may send
 several at once. It passes a tool's failure to the model with its reason, the server's folders
-shown as <books> and <out>, and logs every call in the output folder, for `pgnify report`.
+shown as <books> and <out>, and logs every call in its working folder, for `pgnify report`.
 With --spans, doc_text numbers its lines and build_pgn can copy spans of them (spans.py)."""
 
 import functools
@@ -23,54 +26,124 @@ from pathlib import Path
 from typing import Annotated, Any
 
 import pymupdf
-from mcp.server.mcpserver import Image, MCPServer
+from mcp.server.elicitation import AcceptedElicitation
+from mcp.server.mcpserver import Context, Elicit, ElicitationResult, Image, MCPServer, Resolve
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult, TextContent
 from pydantic import BeforeValidator, Field
 
 from pgnify import __version__, chess_tools, diagram_tools, doc_tools, instructions, spans
-from pgnify.books import Book, BooksLocation
-from pgnify.outputs import Outputs
+from pgnify.books import AskedBooks, Book, BooksLocation
+from pgnify.outputs import Outputs, own_folder
+from pgnify.permission import CANNOT_ASK, Allow, CannotAsk, can_ask
 
 _ONE_AT_A_TIME = threading.Lock()
 # The longest argument text, and the longest error, the log keeps whole.
 _LOGGED_TEXT = 200
 _LOGGED_ERROR = 300
 
-BookName = Annotated[
-    str | None,
-    Field(
-        description="The book, by its name as the server's instructions and error messages "
-        "list it; optional when there is only one book."
-    ),
-]
+FENCED_BOOK = (
+    "The book, by its name as the server's instructions and error messages list it; optional "
+    "when there is only one book."
+)
+ASKED_BOOK = (
+    "The book, by its full path to a PDF or EPUB, absolute or starting with ~. The person is "
+    "asked to allow it the first time; optional when exactly one book has been allowed."
+)
 
-WRITE_PGN = """Write the games converted so far to a PGN file in pgnify's output folder, with a
+_WRITE_PGN = """Write the games converted so far to a PGN file {where}, with a
 blank line between games, and check it as check_pgn does. Give either names, the names of games
 saved from this book with build_pgn, in the order to write them; or games, one PGN game per
 item. An empty list, an empty game or a name not saved is refused, and nothing is written.
 
-file, optional: the PGN file's name, a plain file name without a folder; the book's name if
-left out. A file that this session did not write from this book, such as one there before, is
-not replaced unless replace is true.
+file, {need}: {what} A file that this session did not write from this book, such as one
+there before, is not replaced unless replace is true.{asks}
 
 notes, optional: your account of the conversion, kept beside the PGN file as <name>.notes.md.
 Writing the file again without notes deletes the notes written with it before.
 
-Returns file, the PGN file's name; saved, how many games it now holds; replaced, how many it
-held before; notes, whether notes were kept; unwritten, the names of the games saved from this
+Returns file, the PGN file's path{path}; saved, how many games it now holds; replaced, how many
+it held before; notes, whether notes were kept; unwritten, the names of the games saved from this
 book that no file written from it holds; and check_pgn's ok, dropped and games."""
 
+FENCED_WRITE_PGN = _WRITE_PGN.format(
+    where="in pgnify's output folder",
+    need="optional",
+    asks="",
+    what="""where to save the PGN file in the output folder: a file name, or folders and a
+file name, separated by /, such as Silman/Part Four. Missing folders are made. Each name has
+letters, digits, spaces and . _ - ( ) ', starting with a letter or digit. If left out, the file
+takes the book's name, at the top of the folder.""",
+    path=" in the output folder",
+)
+ASKED_WRITE_PGN = _WRITE_PGN.format(
+    where="in a folder the person allows",
+    need="needed without an output folder",
+    asks=""" With replace true, the person is also asked before a file this session did not write
+from this book is replaced.""",
+    what="""the PGN file's full path, absolute or starting with ~, such as
+~/Chess/Silman/Part Four.pgn; .pgn is added if left out. The person is asked to allow its folder
+the first time, and pgnify makes the folder if it is missing. The file name has letters,
+digits, spaces and . _ - ( ) ', starting with a letter or digit; folder names may hold any
+character except control and formatting characters.""",
+    path="",
+)
 
-def build_server(books: Path, out: Path, spanned: bool = False) -> MCPServer:
-    location, outputs = BooksLocation(books), Outputs(out)
+
+def build_server(
+    books: Path | None, out: Path | None, spanned: bool = False, state: Path | None = None
+) -> MCPServer:
+    """The server for the books at books, or those the person allows when it is None, and the
+    output folder out, or the folders the person allows. Without out it keeps its records in
+    state, pgnify's own folder by default."""
+    location = BooksLocation(books) if books is not None else AskedBooks()
+    outputs = Outputs(out, state or own_folder())
     calls = _Calls(location, outputs)
+    book_type = Annotated[
+        str | None, Field(description=FENCED_BOOK if books is not None else ASKED_BOOK)
+    ]
 
-    def doc_info(book: BookName = None) -> dict[str, Any]:
-        return calls.run("doc_info", {}, book, lambda b: doc_tools.doc_info(str(b.path)))
+    def ask_to_read(book: str | None, ctx: Context) -> Allow | Elicit[Allow] | CannotAsk | None:
+        return _question(location.question(book), ctx)
+
+    def ask_to_read_a_page(
+        book: str | None, page: int | None, ctx: Context
+    ) -> Allow | Elicit[Allow] | CannotAsk | None:
+        # A picture is read without its book.
+        return ask_to_read(book, ctx) if page is not None else None
+
+    def ask_to_write(file: str | None, ctx: Context) -> Allow | Elicit[Allow] | CannotAsk | None:
+        return _question(outputs.question(file), ctx)
+
+    # What the person answered about the book, and the folder: for the tool to settle.
+    read_type = Annotated[ElicitationResult[Allow], Resolve(ask_to_read)]
+    page_read_type = Annotated[ElicitationResult[Allow], Resolve(ask_to_read_a_page)]
+    write_type = Annotated[ElicitationResult[Allow], Resolve(ask_to_write)]
+
+    def ask_to_replace(
+        file: str | None, book: str | None, replace: bool, ctx: Context, folder: write_type
+    ) -> Allow | Elicit[Allow] | CannotAsk | None:
+        # Asked only once the folder is allowed, before this call or by the answer given in it:
+        # the SDK resolves the folder's question first and passes its outcome here.
+        data = folder.data if isinstance(folder, AcceptedElicitation) else None
+        allowed = isinstance(data, Allow) and data.allow
+        question = outputs.replace_question(file, location.book_path(book), replace, allowed)
+        return _question(question, ctx)
+
+    replace_type = Annotated[ElicitationResult[Allow], Resolve(ask_to_replace)]
+
+    def doc_info(book: book_type = None, *, readable: read_type) -> dict[str, Any]:
+        return calls.run(
+            "doc_info", {}, book, lambda b: doc_tools.doc_info(str(b.path)), readable=readable
+        )
 
     def doc_text(
-        first_page: int, last_page: int | None = None, ocr: bool = False, book: BookName = None
+        first_page: int,
+        last_page: int | None = None,
+        ocr: bool = False,
+        book: book_type = None,
+        *,
+        readable: read_type,
     ) -> dict[str, Any]:
         def extract(b: Book) -> dict[str, Any]:
             images = str(outputs.book_folder(b).images)
@@ -79,24 +152,28 @@ def build_server(books: Path, out: Path, spanned: bool = False) -> MCPServer:
             )
 
         arguments = {"first_page": first_page, "last_page": last_page, "ocr": ocr}
-        return calls.run("doc_text", arguments, book, extract)
+        return calls.run("doc_text", arguments, book, extract, readable=readable)
 
-    def doc_search(query: str, book: BookName = None) -> dict[str, Any]:
+    def doc_search(query: str, book: book_type = None, *, readable: read_type) -> dict[str, Any]:
         return calls.run(
-            "doc_search", {"query": query}, book, lambda b: doc_tools.doc_search(str(b.path), query)
+            "doc_search",
+            {"query": query},
+            book,
+            lambda b: doc_tools.doc_search(str(b.path), query),
+            readable=readable,
         )
 
-    def doc_images(page: int, book: BookName = None) -> dict[str, Any]:
+    def doc_images(page: int, book: book_type = None, *, readable: read_type) -> dict[str, Any]:
         def extract(b: Book) -> dict[str, Any]:
             result = doc_tools.doc_images(str(b.path), page, str(outputs.book_folder(b).images))
             for image in result["images"]:
                 image["path"] = Path(image["path"]).relative_to(outputs.folder).as_posix()
             return result
 
-        return calls.run("doc_images", {"page": page}, book, extract)
+        return calls.run("doc_images", {"page": page}, book, extract, readable=readable)
 
     def doc_page(
-        page: int, box: list[float] | None = None, book: BookName = None
+        page: int, box: list[float] | None = None, book: book_type = None, *, readable: read_type
     ) -> CallToolResult:
         def show(b: Book) -> dict[str, Any]:
             images = str(outputs.book_folder(b).images)
@@ -104,7 +181,7 @@ def build_server(books: Path, out: Path, spanned: bool = False) -> MCPServer:
             result["path"] = Path(result["path"]).relative_to(outputs.folder).as_posix()
             return result
 
-        result = calls.run("doc_page", {"page": page, "box": box}, book, show)
+        result = calls.run("doc_page", {"page": page, "box": box}, book, show, readable=readable)
         picture = Image(path=outputs.folder / result["path"]).to_image_content()
         text = TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))
         # Content blocks alone: a client may give its model a result's structured content in
@@ -115,7 +192,9 @@ def build_server(books: Path, out: Path, spanned: bool = False) -> MCPServer:
         image_path: str | None = None,
         box: list[float] | None = None,
         page: int | None = None,
-        book: BookName = None,
+        book: book_type = None,
+        *,
+        readable: page_read_type,
     ) -> dict[str, Any]:
         if page is not None:
 
@@ -130,7 +209,7 @@ def build_server(books: Path, out: Path, spanned: bool = False) -> MCPServer:
                 result["path"] = Path(result["path"]).relative_to(outputs.folder).as_posix()
                 return result
 
-            return calls.run("read_diagram", {"page": page}, book, find)
+            return calls.run("read_diagram", {"page": page}, book, find, readable=readable)
 
         def read(_: Book | None) -> dict[str, Any]:
             if image_path is None:
@@ -138,7 +217,16 @@ def build_server(books: Path, out: Path, spanned: bool = False) -> MCPServer:
                     "give image_path, a picture doc_images or doc_page returned, or page, a "
                     "page whose boards to find"
                 )
-            result = diagram_tools.read_diagram(str(outputs.picture(image_path)), box)
+            picture = outputs.picture(image_path)
+            # pgnify reads a picture extracted in an earlier session only if the person allowed
+            # its book in this one.
+            if not location.owns(picture.relative_to(outputs.work / "books").parts[0]):
+                raise ValueError(
+                    "image_path is a picture of a book the person has not allowed in this "
+                    "session: call doc_info with the book's full path, so that the person is "
+                    "asked, then read the picture again"
+                )
+            result = diagram_tools.read_diagram(str(picture), box)
             if "reason" in result:
                 result["reason"] = calls.safe(result["reason"])
             return result
@@ -146,13 +234,16 @@ def build_server(books: Path, out: Path, spanned: bool = False) -> MCPServer:
         arguments = {"image_path": image_path, "box": box}
         return calls.run("read_diagram", arguments, None, read, needs_book=False)
 
-    def validate_moves(start: str, moves: list[str] | str, book: BookName = None) -> dict[str, Any]:
+    def validate_moves(
+        start: str, moves: list[str] | str, book: book_type = None, *, readable: read_type
+    ) -> dict[str, Any]:
         return calls.run(
             "validate_moves",
             {"start": start, "moves": moves},
             book,
             lambda b: chess_tools.validate_moves(start, moves, calls.figurines(b)),
             needs_book=False,
+            readable=readable,
         )
 
     def check_fen(fen: str) -> dict[str, Any]:
@@ -165,7 +256,9 @@ def build_server(books: Path, out: Path, spanned: bool = False) -> MCPServer:
             "check_pgn", {}, None, lambda _: chess_tools.check_pgn(pgn), needs_book=False
         )
 
-    def build_pgn(spec: Any, name: str | None = None, book: BookName = None) -> dict[str, Any]:
+    def build_pgn(
+        spec: Any, name: str | None = None, book: book_type = None, *, readable: read_type
+    ) -> dict[str, Any]:
         def build(b: Book | None) -> dict[str, Any]:
             if name is not None and b is None:
                 raise ValueError(
@@ -179,7 +272,7 @@ def build_server(books: Path, out: Path, spanned: bool = False) -> MCPServer:
             return chess_tools.build_pgn(spec, name, store, figurines)
 
         arguments = {"name": name, "spec": _spec_summary(spec)}
-        return calls.run("build_pgn", arguments, book, build, needs_book=False)
+        return calls.run("build_pgn", arguments, book, build, needs_book=False, readable=readable)
 
     def write_pgn(
         names: list[str] | None = None,
@@ -187,18 +280,42 @@ def build_server(books: Path, out: Path, spanned: bool = False) -> MCPServer:
         file: str | None = None,
         replace: bool = False,
         notes: str | None = None,
-        book: BookName = None,
+        book: book_type = None,
+        *,
+        readable: read_type,
+        writable: write_type,
+        replacing: replace_type,
     ) -> dict[str, Any]:
         given = (notes or "").strip()
+        # The answer about the folder is kept even when the book is refused, as the person gave it.
+        refusal = outputs.settle(file, writable)
+        refusal = refusal or outputs.settle_replace(
+            file, location.book_path(book), replace, replacing
+        )
 
         def write(b: Book) -> dict[str, Any]:
+            if refusal:
+                raise ValueError(refusal)
             target = outputs.target(file, b, replace)
             store = str(outputs.book_folder(b).games)
-            result = chess_tools.write_pgn(path=str(target), games=games, names=names, store=store)
+            unsaved = (
+                ""
+                if outputs.fenced
+                else ". If it was saved in an earlier session, build it again with build_pgn: each "
+                "session keeps its own games"
+            )
+            result = chess_tools.write_pgn(
+                path=str(target), games=games, names=names, store=store, unsaved=unsaved
+            )
             outputs.wrote(target, b, names or len(games or []), given)
             del result["path"]
             unwritten = outputs.unwritten(b)
-            return {"file": target.name, **result, "notes": bool(given), "unwritten": unwritten}
+            return {
+                "file": outputs.named(target),
+                **result,
+                "notes": bool(given),
+                "unwritten": unwritten,
+            }
 
         arguments = {
             "names": names,
@@ -207,15 +324,25 @@ def build_server(books: Path, out: Path, spanned: bool = False) -> MCPServer:
             "replace": replace,
             "notes": len(given),
         }
-        return calls.run("write_pgn", arguments, book, write)
+        return calls.run("write_pgn", arguments, book, write, readable=readable)
 
+    reads = (
+        f"It reads only the books it was given; {location.listing()}."
+        if books is not None
+        else "It reads only the books the person allows: name each by its full path, to a PDF or "
+        "EPUB, and the person is asked the first time."
+    )
+    writes = (
+        "It writes only into its output folder, in the files and folders write_pgn names."
+        if out is not None
+        else "It writes PGN files only in the folders the person allows: give write_pgn the "
+        "file's full path, and the person is asked the first time for each folder."
+    )
     server = MCPServer(
         "pgnify",
         instructions=(
-            "pgnify reads chess books and writes PGN. It reads only the books it was given; "
-            f"{location.listing()}. It writes only into its output folder, under plain file "
-            "names. Its prompt convert gives the conversion instructions, as pgnify's skill "
-            "does."
+            f"pgnify reads chess books and writes PGN. {reads} {writes} Its prompt convert "
+            "gives the conversion instructions, as pgnify's skill does."
         ),
         version=__version__,
     )
@@ -223,7 +350,7 @@ def build_server(books: Path, out: Path, spanned: bool = False) -> MCPServer:
         (validate_moves, chess_tools.validate_moves.__doc__),
         (check_fen, chess_tools.check_fen.__doc__),
         (check_pgn, chess_tools.check_pgn.__doc__),
-        (write_pgn, WRITE_PGN),
+        (write_pgn, FENCED_WRITE_PGN if out is not None else ASKED_WRITE_PGN),
         (read_diagram, diagram_tools.READ_DIAGRAM),
         (doc_info, doc_tools.doc_info.__doc__),
         (
@@ -257,7 +384,7 @@ class _Calls:
     """What the server does around each call: choosing its book, logging it, and cleaning the
     server's paths out of its errors."""
 
-    def __init__(self, location: BooksLocation, outputs: Outputs):
+    def __init__(self, location: BooksLocation | AskedBooks, outputs: Outputs):
         self.location, self.outputs = location, outputs
 
     def figurines(self, book: Book | None) -> str | None:
@@ -271,9 +398,11 @@ class _Calls:
         book: str | None,
         call: Callable[[Any], dict[str, Any]],
         needs_book: bool = True,
+        readable: Any = None,
     ) -> dict[str, Any]:
         """Call call with the book named, else the only book, else None for a tool that can do
-        without one, and log the call with its arguments and its result or error."""
+        without one, and log the call with its arguments and its result or error. readable is
+        what the person answered about reading the book named, when a question was asked."""
         entry: dict[str, Any] = {
             "time": datetime.now(UTC).isoformat(timespec="seconds"),
             "tool": name,
@@ -282,6 +411,8 @@ class _Calls:
         started = time.monotonic()
         try:
             chosen = None
+            if refusal := self.location.settle(book, readable):
+                raise ValueError(refusal)
             if needs_book or book is not None or len(self.location.books) == 1:
                 chosen = self.location.get(book)
             if chosen is not None:
@@ -309,8 +440,13 @@ class _Calls:
 
     def safe(self, message: str) -> str:
         """The message with the server's folders shown as <out> and <books>, and the home
-        folder as ~, whether a path is written as it is or escaped as repr and JSON escape it."""
-        folders = [(self.outputs.folder, "<out>"), (self.location.root, "<books>")]
+        folder as ~, whether a path is written as it is or escaped as repr and JSON escape it.
+        A folder the person allowed is shown in full, with ~ for the home folder."""
+        folders: list[tuple[Path, str]] = []
+        if self.outputs.fenced:
+            folders.append((self.outputs.folder, "<out>"))
+        if isinstance(self.location, BooksLocation):
+            folders.append((self.location.root, "<books>"))
         home = Path.home()
         if home != Path(home.anchor):  # a home folder at the root would hide every slash
             folders.append((home, "~"))
@@ -319,6 +455,15 @@ class _Calls:
         for form in sorted(places, key=len, reverse=True):
             message = message.replace(form, places[form])
         return message
+
+
+def _question(question: str | None, ctx: Context) -> Allow | Elicit[Allow] | CannotAsk | None:
+    """What a resolver gives the SDK for a question: the form to ask the person, or, when the
+    client has not declared form elicitation, a plain value the tool reports; None when there is
+    nothing to ask."""
+    if question is None:
+        return None
+    return Elicit(question, Allow) if can_ask(ctx.client_capabilities) else CANNOT_ASK
 
 
 def _described(error: Exception) -> str:

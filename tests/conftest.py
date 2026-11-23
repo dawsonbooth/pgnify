@@ -12,6 +12,17 @@ from support import PRIMER, ROOT, png, write_epub, write_text_epub
 from pgnify import tesseract
 
 
+@pytest.fixture(autouse=True)
+def _home(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A home folder of the test's own, so that pgnify's own folder, ~/.local/state/pgnify, is
+    never the one on the machine that runs the tests."""
+    if "PGNIFY_CACHE" not in os.environ:  # the weights stay where the machine keeps them
+        monkeypatch.setenv("PGNIFY_CACHE", str(Path.home() / ".cache" / "pgnify"))
+    home = tmp_path_factory.mktemp("home")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+
+
 @pytest.fixture(scope="module")
 def checkout_weights() -> Iterator[None]:
     """Live tests use a checkout's models/ weights, if present, unless PGNIFY_WEIGHTS is set."""

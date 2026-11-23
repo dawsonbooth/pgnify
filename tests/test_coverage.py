@@ -156,6 +156,36 @@ def test_report_coverage_of_pages_needs_one_book(book: Path, tmp_path: Path) -> 
     assert len(report(out, coverage="all")["books"]) == 2
 
 
+def test_report_coverage_of_pages_counts_the_books_of_files_in_folders(
+    book: Path, tmp_path: Path
+) -> None:
+    out = _converted(book, tmp_path / "out", [PLANS])
+    other = write_pdf(tmp_path / "other.pdf", [ROOKS])
+    call_tools(
+        other,
+        out,
+        [
+            ("build_pgn", {"spec": {"comment": ROOKS}, "name": "rooks"}),
+            ("write_pgn", {"names": ["rooks"], "file": "Rooks/Games"}),
+        ],
+    )
+    with pytest.raises(ValueError, match="2 books"):
+        report(out, coverage="1")
+    assert len(report(out, coverage="all")["books"]) == 2
+    # One book's files, in a folder and at the top, are one book's PGN files.
+    call_tools(
+        book,
+        out,
+        [
+            ("build_pgn", {"spec": {"comment": PLANS}, "name": "plans-again"}),
+            ("write_pgn", {"names": ["plans-again"], "file": "Plans/Games"}),
+        ],
+    )
+    (out / "Rooks" / "Games.pgn").unlink()
+    (kept,) = report(out, coverage="1")["books"]
+    assert kept["files"] == ["Plans/Games.pgn", "plans.pgn"]
+
+
 def test_the_command_line_names_the_scope_and_refuses_pages_the_book_lacks(
     book: Path, tmp_path: Path
 ) -> None:

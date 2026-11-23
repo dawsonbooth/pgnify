@@ -474,6 +474,47 @@ def test_report_compares_comments_with_the_book_a_pgn_file_was_written_from(
     assert len(lacking) == 1 and "resign" in lacking[0]
 
 
+def test_report_checks_a_file_the_records_name_in_a_folder_and_not_one_they_do_not(
+    primer: Path, tmp_path: Path
+) -> None:
+    call_tools(
+        primer,
+        tmp_path,
+        [
+            (
+                "write_pgn",
+                {"games": [ONE_GAME], "file": "Silman/Part Four/Games", "notes": "Seen."},
+            ),
+            ("write_pgn", {"games": [ONE_GAME], "file": "Top"}),
+        ],
+    )
+    # A PGN file pgnify did not write, in the folder pgnify wrote to and in another.
+    (tmp_path / "Silman" / "Unrecorded.pgn").write_text('[Result "*"]\n\n1. d4 *\n')
+    (tmp_path / "Other").mkdir()
+    (tmp_path / "Other" / "Thousands.pgn").write_text('[Result "*"]\n\n1. c4 *\n')
+    reported = report(tmp_path)
+    files = [output["file"] for output in reported["outputs"]]
+    assert files == ["Silman/Part Four/Games.pgn", "Top.pgn"]
+    folder_file, _ = reported["outputs"]
+    assert folder_file["book"] == "pocket-primer.epub"
+    assert folder_file["book_found"] is True
+    assert folder_file["model_account"] == "Seen."
+    (book,) = reported["books"]
+    assert book["files"] == ["Silman/Part Four/Games.pgn", "Top.pgn"]
+    text = (tmp_path / "report.md").read_text()
+    assert "## Silman/Part Four/Games.pgn" in text
+    assert "Unrecorded" not in text and "Thousands" not in text
+
+
+def test_report_skips_a_recorded_file_that_is_gone_and_a_folder_named_like_a_pgn_file(
+    primer: Path, tmp_path: Path
+) -> None:
+    call_tools(primer, tmp_path, [("write_pgn", {"games": [ONE_GAME], "file": "a/b"})])
+    (tmp_path / "a" / "b.pgn").unlink()
+    (tmp_path / "Folder.pgn").mkdir()
+    assert report(tmp_path)["outputs"] == []
+
+
 def test_a_game_built_but_never_saved_is_a_possible_issue(primer: Path, tmp_path: Path) -> None:
     # 1.e5 is not legal, so g is never saved.
     call_tools(

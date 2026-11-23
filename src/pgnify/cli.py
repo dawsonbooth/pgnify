@@ -40,15 +40,22 @@ def _options(
 @app.command()
 def serve(
     books: Annotated[
-        Path,
+        Path | None,
         typer.Option(
-            help="A book, or a folder of books (PDF and EPUB). The server reads nothing else."
+            help="A book, or a folder of books (PDF and EPUB). The server reads nothing else "
+            "and asks nothing about books. Without it, the assistant gives each book's full "
+            "path, and the server asks you through your client the first time."
         ),
-    ],
+    ] = None,
     out: Annotated[
-        Path,
-        typer.Option(help="The folder for the PGN files. The server writes nothing elsewhere."),
-    ],
+        Path | None,
+        typer.Option(
+            help="The folder for the PGN files. The server writes nothing elsewhere and asks "
+            "nothing about folders. Without it, the assistant gives each file's full path, and "
+            "the server asks you through your client before it first writes in each folder. Its "
+            "records then go in ~/.local/state/pgnify/."
+        ),
+    ] = None,
     spans: Annotated[
         bool,
         typer.Option(help="Experimental: number doc_text's lines, and let build_pgn copy them."),
@@ -56,7 +63,8 @@ def serve(
 ) -> None:
     """Run the MCP server on stdin and stdout.
 
-    An AI assistant's client starts it as a stdio server."""
+    An AI assistant's client starts it as a stdio server. Give --books and --out to be asked
+    nothing."""
     from pgnify.server import build_server
 
     try:
@@ -91,7 +99,12 @@ def check(
 
 @app.command(name="report")
 def report_(
-    folder: Annotated[Path, typer.Argument(help="An output folder of pgnify serve.")],
+    folder: Annotated[
+        Path,
+        typer.Argument(
+            help="A folder that pgnify serve wrote PGN files to, with or without --out."
+        ),
+    ],
     images: Annotated[
         bool,
         typer.Option(help="Also save each doubtful diagram beside its game's position."),
@@ -108,8 +121,11 @@ def report_(
     """Report on a conversion without a model.
 
     Checks each PGN file in the folder against its book, reports for each book what the
-    server's log shows across its PGN files, and quotes the model's account separately. Writes
-    report.md and report.json into the folder, and exits 1 when there is a verified problem."""
+    server's log shows across its PGN files, and quotes the model's account separately. It
+    reads pgnify's records from the folder's .pgnify/ and from ~/.local/state/pgnify/. It lists tool
+    errors that belong to no PGN file only from the log in the folder's .pgnify/, since pgnify's
+    own log holds every session's calls. Writes report.md and report.json into the folder, and
+    exits 1 when there is a verified problem."""
     from pgnify import report
 
     try:

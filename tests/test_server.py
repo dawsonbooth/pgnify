@@ -484,6 +484,60 @@ def test_the_servers_instructions_list_its_books(primer: Path, tmp_path: Path) -
     assert server_instructions is not None and "'pocket-primer.epub'" in server_instructions
 
 
+def test_write_pgn_saves_in_a_new_folder_with_its_notes_beside_it(
+    books_folder: Path, tmp_path: Path
+) -> None:
+    out = tmp_path / "out"
+    name = "Silman/Part Four/Games"
+    *_, written = call_tools(
+        books_folder,
+        out,
+        [
+            _saved("a"),
+            (
+                "write_pgn",
+                {"names": ["a"], "file": name, "notes": "Left out p. 9.", "book": "two-pages.pdf"},
+            ),
+        ],
+    )
+    assert not written.is_error
+    assert written.structured_content is not None
+    assert written.structured_content["file"] == "Silman/Part Four/Games.pgn"
+    assert written.structured_content["unwritten"] == []
+    folder = out / "Silman" / "Part Four"
+    assert "1. e4 e5" in (folder / "Games.pgn").read_text()
+    assert (folder / "Games.notes.md").read_text().startswith(NOTES_HEADING)
+    assert sorted(path.name for path in out.iterdir()) == [".pgnify", "Silman"]
+    records = json.loads((out / ".pgnify" / "outputs.json").read_text())
+    assert list(records) == ["Silman/Part Four/Games.pgn"]
+    assert records["Silman/Part Four/Games.pgn"]["book"] == "two-pages.pdf"
+    assert records["Silman/Part Four/Games.pgn"]["notes"] is True
+
+
+def test_write_pgn_makes_no_folder_when_it_refuses_to_write(
+    books_folder: Path, tmp_path: Path
+) -> None:
+    out = tmp_path / "out"
+    (tmp_path / "elsewhere").mkdir()
+    out.mkdir()
+    (out / "linked").symlink_to(tmp_path / "elsewhere", target_is_directory=True)
+    empty, escaping, linked = call_tools(
+        books_folder,
+        out,
+        [
+            ("write_pgn", {"games": [], "file": "New/Games", "book": "two-pages.pdf"}),
+            ("write_pgn", {"games": [ONE_GAME], "file": "../Up/Games", "book": "two-pages.pdf"}),
+            ("write_pgn", {"games": [ONE_GAME], "file": "linked/Games", "book": "two-pages.pdf"}),
+        ],
+    )
+    assert empty.is_error and "no games given" in _text(empty)
+    assert escaping.is_error and "not a plain file name" in _text(escaping)
+    assert linked.is_error and "is a link, so nothing was written" in _text(linked)
+    assert sorted(path.name for path in out.iterdir()) == [".pgnify", "linked"]
+    assert list((tmp_path / "elsewhere").iterdir()) == []
+    assert not (tmp_path / "Up").exists()
+
+
 def _saved(
     name: str, book: str = "two-pages.pdf", moves: tuple[str, ...] = ("e4", "e5")
 ) -> tuple[str, dict[str, Any]]:

@@ -10,7 +10,8 @@ from typing import Any
 import pymupdf
 import pytest
 from mcp import Client
-from mcp.types import CallToolResult
+from mcp.client.session import ClientRequestContext
+from mcp.types import CallToolResult, ElicitRequestParams, ElicitResult
 
 from pgnify.chess_tools import MoveSpec, render_board
 from pgnify.server import build_server
@@ -82,28 +83,76 @@ def write_text_epub(destination: Path, body: str) -> Path:
     return write_epub(destination, files)
 
 
+class Person:
+    """A person at a client that can ask. It answers by the question's subject (a book to read, a
+    folder to write in, a file to replace) with "yes", "unticked", "decline" or "cancel", and
+    records each question and form."""
+
+    def __init__(self, book: str = "yes", folder: str = "yes", replace: str = "yes"):
+        self.answers = {"read": book, "write": folder, "replace": replace}
+        self.asked: list[str] = []
+        self.forms: list[Any] = []
+
+    async def __call__(
+        self, context: ClientRequestContext, params: ElicitRequestParams
+    ) -> ElicitResult:
+        self.asked.append(params.message)
+        self.forms.append(getattr(params, "requested_schema", None))
+        if "read this book" in params.message:
+            action = self.answers["read"]
+        elif "replace this file" in params.message:
+            action = self.answers["replace"]
+        else:
+            action = self.answers["write"]
+        if action == "decline" or action == "cancel":
+            return ElicitResult(action=action)
+        return ElicitResult(action="accept", content={"allow": action == "yes"})
+
+
+# The two eras of the protocol that a server answers in: a question asked as a request to the
+# client in the middle of a call (up to 2025-11-25), and as a result that asks for input and a
+# retry of the call (from 2026-07-28).
+ERAS = ["legacy", "2026-07-28"]
+
+
 def in_session[T](
-    books: Path, out: Path, act: Callable[[Client], Awaitable[T]], spanned: bool = False
+    books: Path | None,
+    out: Path | None,
+    act: Callable[[Client], Awaitable[T]],
+    spanned: bool = False,
+    *,
+    state: Path | None = None,
+    person: Person | None = None,
+    era: str = "auto",
 ) -> T:
     """Run act with the SDK's in-process client, connected to a server for the books at books and
-    the output folder out, and return its result."""
+    the output folder out, and return its result. The server keeps its records in state when out
+    is None. With a person the client can ask questions, and speaks the protocol of the era."""
 
     async def run() -> T:
-        async with Client(build_server(books, out, spanned=spanned)) as client:
+        server = build_server(books, out, spanned=spanned, state=state)
+        async with Client(server, mode=era, elicitation_callback=person) as client:
             return await act(client)
 
     return asyncio.run(run())
 
 
 def call_tools(
-    books: Path, out: Path, calls: list[tuple[str, dict[str, Any]]], spanned: bool = False
+    books: Path | None,
+    out: Path | None,
+    calls: list[tuple[str, dict[str, Any]]],
+    spanned: bool = False,
+    *,
+    state: Path | None = None,
+    person: Person | None = None,
+    era: str = "auto",
 ) -> list[CallToolResult]:
     """Call the tools in turn, in one session."""
 
     async def call(client: Client) -> list[CallToolResult]:
         return [await client.call_tool(name, arguments) for name, arguments in calls]
 
-    return in_session(books, out, call, spanned)
+    return in_session(books, out, call, spanned, state=state, person=person, era=era)
 
 
 # The four kinds of PDF pgnify reads, made small: a scan whose text ClearScan replaced, a scan with

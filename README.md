@@ -35,12 +35,49 @@ To update pgnify, run `uv tool upgrade pgnify`. It installs the repository's lat
 
 ## Connect it to your assistant
 
-Choose what pgnify reads and where it writes:
+Register pgnify with no flags, as `pgnify serve`. The assistant then gives pgnify the full path of each book and each PGN file, such as `~/Chess/Books/Workbook.epub` or `~/Chess/PGN/Silman/Part Four.pgn`. The first time it names a book, your client shows you a question:
 
-- `--books`: a book, or a folder of books. pgnify reads nothing else.
-- `--out`: a folder for pgnify's output alone. pgnify writes nothing anywhere else.
+```text
+Allow pgnify to read this book until this session ends?
+
+~/Chess/Books/Workbook.epub
+```
+
+The first time it names a folder to save in:
+
+```text
+Allow pgnify to write PGN files in this folder, and in folders
+inside it, until this session ends?
+
+~/Chess/PGN/Silman
+
+pgnify will create the folder if it is missing.
+```
+
+Without `--out`, pgnify also asks before it replaces a file that this session didn't write from the same book, when the assistant asks to replace it. A session lasts until your client stops pgnify, as when you quit Claude Code. Each question has an **Allow** box, ticked to begin with. Your answers work like this:
+
+- **Yes**: allows that book, that folder and the folders inside it, or replacing that file, until the session ends.
+- **No, or yes with the box unticked**: refuses that path, and anything inside it, for the rest of the session, without asking again.
+- **Closing the question**: refuses only that one request.
+
+The questions about a book or a folder show the path with any links followed and, when it differs, the path the assistant gave. pgnify refuses, without asking, a path that holds line breaks or other invisible characters.
+
+These flags set pgnify's folders, and with them it asks nothing. With only one, it asks only about the other:
+
+- `--books`: a book, or a folder of books. pgnify reads nothing else, and the assistant names a book by its path within the folder.
+- `--out`: a folder for pgnify's output alone. pgnify writes nothing anywhere else, and the assistant names a file by its path within the folder, such as `Silman/Part Four`.
+
+A run with nobody to answer, such as a script, needs both flags. Claude Code's print mode (`claude -p`) cancelled pgnify's questions when we tried it, so pgnify refused the request. If a client doesn't support questions, pgnify's error names the flag to start it with.
 
 ### Claude Code
+
+Register pgnify so that it asks you about each book and folder:
+
+```sh
+claude mcp add --scope user pgnify -- pgnify serve
+```
+
+Or set both folders:
 
 ```sh
 claude mcp add --scope user pgnify -- pgnify serve --books ~/Chess/Books --out ~/Chess/PGN
@@ -61,9 +98,11 @@ Add pgnify to `claude_desktop_config.json`, in `~/Library/Application Support/Cl
 }
 ```
 
+This example sets both folders. To be asked instead, use `"args": ["serve"]`. pgnify's questions haven't been tried in Claude Desktop yet.
+
 ### Other MCP clients
 
-Add a stdio server whose command is `pgnify serve --books PATH --out DIR`.
+Add a stdio server whose command is `pgnify serve`. Add `--books PATH` and `--out DIR` to be asked nothing.
 
 If the client says the server failed to start, run the same command in a terminal: pgnify prints why it stopped, such as `there is no PDF or EPUB at …`. To try the tools by hand, run the [MCP Inspector](https://modelcontextprotocol.io/docs/tools/inspector), which needs Node.js:
 
@@ -83,7 +122,7 @@ The conversion instructions are one text, and your assistant can get them in thr
   /plugin install pgnify@pgnify
   ```
 
-  The plugin holds only the skill, `pgnify-convert`. It does not register the server, so you always choose the folders yourself. For another assistant that reads skills, copy this repository's `plugin/skills/pgnify-convert/` into its skills folder.
+  The plugin holds only the skill, `pgnify-convert`. It does not register the server: register it as [Connect it to your assistant](#connect-it-to-your-assistant) shows. For another assistant that reads skills, copy this repository's `plugin/skills/pgnify-convert/` into its skills folder.
 - **As plain text**: `pgnify instructions` prints them, to paste into any assistant.
 
 Then ask for the part you want, for instance: "Convert Chapter 5 of Workbook.epub, the rook forks with their solutions, into PGN." You can also ask for an output convention, such as one game for each exercise with its solution's moves, or a numbering for the Round tag. Without one, the assistant follows the book's structure and says in its notes which convention it chose.
@@ -119,11 +158,21 @@ pgnify supports two kinds of assistant, and says which it has tried:
 
 ## Output files
 
-In the `--out` folder:
+The assistant chooses where each PGN file goes, and pgnify adds `.pgn` if the name lacks it:
 
-- `NAME.pgn`: the games. Unless the assistant gives another name, NAME is the book's.
-- `NAME.notes.md`, when the assistant gave notes: the model's own account of what it could not resolve, what it left out and the conventions it chose.
-- `.pgnify/`: pgnify's working folder. It holds a log of every tool call and, in a folder for each book, the pictures the server extracted, the pages it showed, the games it saved and the pieces it read the book's figurines as.
+- **Without `--out`**: the assistant gives the file's full path, in a folder you allowed.
+- **With `--out`**: it gives a path within that folder, such as `Silman/Part Four`, or gives none, and the file takes the book's name, at the top of the folder.
+
+pgnify writes these files:
+
+- `file_name.pgn`: the games.
+- `file_name.notes.md`, beside it when the assistant gives notes: the model's own account of what it could not resolve, what it left out and the conventions it chose.
+- The working folder: `.pgnify/` inside `--out`, or `~/.local/state/pgnify/` without `--out`, which several sessions can share. It holds:
+  - a log of every tool call;
+  - the book each PGN file came from;
+  - a folder for each book, with the pictures the server extracted, the pages it showed, the games it saved and the pieces it read the book's figurines as.
+
+Without `--out`, games saved by name with `build_pgn` belong to the session that saved them, so after a restart the assistant must build them again. PGN files already written are unaffected.
 
 ## Check the result
 
@@ -137,6 +186,8 @@ pgnify report ~/Chess/PGN --coverage 46-103  # the same, for the pages you asked
 pgnify check games.pgn --book Workbook.epub
 ```
 
+The report checks the PGN files at the top of the folder and the ones pgnify wrote in its subfolders. It reads pgnify's log and its record of the book each file came from, in the folder's `.pgnify/` and in `~/.local/state/pgnify/`. A book's findings cover every session in those logs that converted it. The report lists tool errors that belong to no PGN file only from the folder's `.pgnify/` log, since pgnify's own log holds every session's calls.
+
 The report sorts its findings into four kinds:
 
 - **Verified problems**: mechanical facts that need fixing, such as an illegal move, a starting position (FEN tag) that isn't legal, a missing result or one the game contradicts, or text a PGN reader would drop.
@@ -146,7 +197,7 @@ The report sorts its findings into four kinds:
 - **Possible issues**: observations for a person to judge.
   - In each PGN file: squares marked uncertain, a position given without moves, comment text not found word for word in the book, a passage given more than once, and a game that starts from a diagram read with doubts.
   - Where the book's text layer appears to be a machine reading of scanned pages, because its file names a capture or OCR tool or most of its pages with text lie over a picture of the page, comment text not found in it is of lower confidence: a faithful comment differs from such a layer wherever the layer misreads the page. `report.md` counts these apart, by game, with examples, and `report.json` keeps every one. A book whose file has no text layer at all is not compared.
-  - For each book, from the server's log of every session in the folder: a diagram whose position no game in the book's PGN files reaches, a diagram extracted but never read, a game the assistant built and never saved, and the tools' errors. A diagram counts as found when any of those files reaches it, so these findings show what the files hold together, not that any one conversion is complete.
+  - For each book, from pgnify's logs of every session that converted it, in the folder's `.pgnify/` and in `~/.local/state/pgnify/`: a diagram whose position no game in the book's PGN files reaches, a diagram extracted but never read, a game the assistant built and never saved, and the tools' errors. A diagram counts as found when any of those files reaches it, so these findings show what the files hold together, not that any one conversion is complete.
 - **The model's own account**: its notes, quoted as it gave them and not verified.
 
 For a game's position, the report keeps three cases apart:
@@ -165,13 +216,20 @@ A report without verified problems does not mean the conversion is complete or f
 
 pgnify checks every path the assistant gives it, but it is not a sandbox:
 
-- **What pgnify reads**: only the PDF and EPUB files at `--books`, in that folder and its subfolders. It skips hidden files and folders, and any link that leads outside the folder, to a hidden file, or to anything but a PDF or EPUB. The assistant names a book by its path within the folder, never by an absolute path.
-- **What it writes**: only into `--out`: PGN and notes files under plain file names, and its working folder `.pgnify/`. It never writes through a link or over a notes file it didn't write. It replaces a PGN file only if it wrote that file in the same session from the same book, or if the assistant asks it to.
+- **What pgnify reads**:
+  - **Without `--books`**: each book you allow, named by its full path. pgnify refuses a relative path, or a file that isn't a PDF or EPUB, without asking. It asks about the file the path leads to once links are followed, so a link to a book you allowed counts as that book.
+  - **With `--books`**: only the PDF and EPUB files in that folder and its subfolders, named by their path within it. pgnify asks nothing. It skips hidden files and folders, and any link that leads outside the folder, to a hidden file, or to anything but a PDF or EPUB.
+- **What it writes**: PGN and notes files, and its working folder.
+  - **Without `--out`**: only in folders you allow and the folders inside them, and in pgnify's own folder. When a path passes through a link, pgnify asks about the folder the link leads to.
+  - **With `--out`**: only inside that folder, in folders with plain names and never through a link. pgnify asks nothing.
+  - **Either way**: it never writes over a notes file it didn't write. It replaces a PGN file only if it wrote that file in this session from the same book, or if the assistant asks it to; without `--out`, it asks you before such a replace.
+- **Only you can allow access**: where no flag is given, pgnify reads or writes a path only after your yes in the client, never because of anything the assistant writes. A refused request reads no book, writes no PGN or notes file and creates no folder.
+- **pgnify's own folder**: sessions without `--out` share `~/.local/state/pgnify/`. It holds the pictures of the pages pgnify showed or extracted, the games the assistant saved and a log of every call, so keep it as private as the books.
 - **Books kept separate**: each book's saved games, pictures and figurine readings go in a folder of their own, so two books served together never share them.
-- **Paths in errors**: the tools' error messages show `<books>`, `<out>` and `~` in place of your folders' paths.
+- **Paths in errors**: the tools' error messages show `<books>` and `<out>` for the folders `--books` and `--out` set, and `~` for your home folder.
 - **Network**: the server makes no network connections. `pgnify setup` downloads the weights from GitHub only when you run it without `--from`.
-- **Your rights**: the server, its diagram reader and Tesseract run as you, so a flaw in pgnify, or in a library it uses to read a book, could read or change any file you can. Point `--books` at a folder that holds only books, point `--out` at a folder for pgnify alone, and give it only files you would open in any other reader.
-- **What your assistant sees**: whatever the tools return goes to your assistant, and through it to its model provider: the text of the pages it reads, the lines its searches find, and the pictures of the pages `doc_page` shows it, which it asks for to read a scanned page or a diagram set in a chess font. `doc_images` returns no pictures, only their paths, though an assistant with file tools could open the pictures pgnify saves into `--out`.
+- **Your rights**: the server, its diagram reader and Tesseract run as you, so a flaw in pgnify, or in a library it uses to read a book, could read or change any file you can. Allow only books and folders you mean it to use, and point `--books` and `--out` at folders that hold only books, or are for pgnify alone. Give it only files you would open in any other reader.
+- **What your assistant sees**: whatever the tools return goes to your assistant, and through it to its model provider: the text of the pages it reads, the lines its searches find, and the pictures of the pages `doc_page` shows it, which it asks for to read a scanned page or a diagram set in a chess font. `doc_images` returns no pictures, only their paths, though an assistant with file tools could open the pictures pgnify saves in its working folder.
 
 ## Books and copyright
 
@@ -185,8 +243,8 @@ A span is a passage of the book's text, named by its page and line numbers. With
 
 | Command | What it does |
 |---|---|
-| `pgnify serve --books PATH --out DIR [--spans]` | runs the MCP server on stdin and stdout |
-| `pgnify report DIR [--images] [--coverage PAGES]` | reports on a conversion's output folder |
+| `pgnify serve [--books PATH] [--out DIR] [--spans]` | runs the MCP server on stdin and stdout, and asks you about any book or folder that `--books` or `--out` doesn't set |
+| `pgnify report DIR [--images] [--coverage PAGES]` | checks the PGN files in a folder that pgnify wrote to |
 | `pgnify check FILE.pgn [--book BOOK]` | checks one PGN file |
 | `pgnify setup [--from DIR]` | installs the diagram reader's weights |
 | `pgnify instructions` | prints the conversion instructions |

@@ -1,5 +1,6 @@
 """Tests of what the server may read (books.py) and write (outputs.py)."""
 
+import json
 import shutil
 from pathlib import Path
 
@@ -9,7 +10,7 @@ from support import move_specs
 from pgnify.books import Book, BooksLocation
 from pgnify.chess_tools import build_pgn, read_figurines
 from pgnify.doc_tools import doc_page
-from pgnify.outputs import Outputs
+from pgnify.outputs import NOTES_HEADING, Outputs
 
 
 @pytest.fixture
@@ -122,7 +123,6 @@ def test_two_books_a_copy_and_a_link_each_get_their_own_book_folder(
     "name",
     [
         "../up",
-        "sub/inner",
         "/abs",
         ".hidden",
         "-dash",
@@ -136,6 +136,215 @@ def test_an_output_name_that_is_not_a_plain_file_name_is_refused(
 ) -> None:
     with pytest.raises(ValueError, match="not a plain file name"):
         outputs.target(name, book, replace=False)
+
+
+def _only_pgnify(outputs: Outputs) -> bool:
+    """Whether the output folder holds nothing but pgnify's working folder."""
+    return [path.name for path in outputs.folder.iterdir()] == [".pgnify"]
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "a//b",
+        "a/",
+        "../x",
+        "x/../y",
+        "./x",
+        "a/./b",
+        "/abs",
+        "a\\b",
+        "C:/x",
+        "C:\\x",
+        ".hidden/x",
+        "a/.pgnify/x",
+        "a/.hidden",
+        "-dash/x",
+        pytest.param("/".join(["a" * 50] * 6), id="over-255-characters"),
+        pytest.param("a" * 90 + "/" + "b" * 93, id="part-over-96-characters"),
+    ],
+)
+def test_an_output_path_that_is_not_a_relative_path_of_plain_names_is_refused(
+    outputs: Outputs, book: Book, name: str
+) -> None:
+    with pytest.raises(ValueError, match="not a plain file name or a path of folders"):
+        outputs.target(name, book, replace=False)
+    assert _only_pgnify(outputs)
+
+
+def test_an_output_path_of_255_characters_is_allowed(outputs: Outputs, book: Book) -> None:
+    name = "/".join(["a" * 50] * 4 + ["b" * 47])
+    assert len(name) + len(".pgn") == 255
+    assert outputs.target(name, book, replace=False) == outputs.folder / f"{name}.pgn"
+    with pytest.raises(ValueError, match="not a plain file name or a path of folders"):
+        outputs.target(name + "b", book, replace=False)
+
+
+def test_an_output_in_new_folders_is_planned_without_making_them(
+    outputs: Outputs, book: Book
+) -> None:
+    path = outputs.target("Silman/Part Four/Games.PGN", book, replace=False)
+    assert path == outputs.folder / "Silman" / "Part Four" / "Games.pgn"
+    assert _only_pgnify(outputs)
+
+
+def test_an_output_given_no_name_stays_at_the_top_of_the_folder(
+    outputs: Outputs, book: Book
+) -> None:
+    assert outputs.target(None, book, replace=False).parent == outputs.folder
+
+
+def test_a_folder_there_in_another_case_keeps_its_name(outputs: Outputs, book: Book) -> None:
+    (outputs.folder / "Silman" / "Part Four").mkdir(parents=True)
+    (outputs.folder / "Silman" / "Part Four" / "Games.pgn").write_text("")
+    path = outputs.target("silman/PART FOUR/games", book, replace=True)
+    assert path == outputs.folder / "Silman" / "Part Four" / "Games.pgn"
+    # Where a folder is missing, the names after it are as given.
+    new = outputs.target("SILMAN/part five/Games", book, replace=False)
+    assert new == outputs.folder / "Silman" / "part five" / "Games.pgn"
+
+
+def test_a_folder_there_under_the_exact_name_is_preferred_to_another_case(
+    outputs: Outputs, book: Book
+) -> None:
+    (outputs.folder / "a").mkdir()
+    try:
+        (outputs.folder / "A").mkdir()
+    except FileExistsError:
+        pytest.skip("the file system ignores case")
+    assert outputs.target("A/x", book, replace=False).parent.name == "A"
+
+
+@pytest.mark.parametrize("where", ["inside", "outside"])
+@pytest.mark.parametrize("depth", ["first", "second"])
+def test_a_link_on_the_way_to_an_output_is_never_written_through(
+    outputs: Outputs, book: Book, tmp_path: Path, where: str, depth: str
+) -> None:
+    (outputs.folder / "real").mkdir()
+    target = outputs.folder / "real" if where == "inside" else tmp_path / "elsewhere"
+    target.mkdir(exist_ok=True)
+    planted = outputs.folder / "linked" if depth == "first" else outputs.folder / "real" / "linked"
+    planted.symlink_to(target, target_is_directory=True)
+    name = "linked/x" if depth == "first" else "real/linked/x"
+    with pytest.raises(ValueError, match="is a link, so nothing was written"):
+        outputs.target(name, book, replace=True)
+    assert sorted(path.name for path in target.iterdir()) == (
+        ["linked"] if where == "inside" and depth == "second" else []
+    )
+    assert not (outputs.folder / "real" / "x.pgn").exists()
+
+
+def test_a_link_to_nowhere_on_the_way_to_an_output_is_refused(
+    outputs: Outputs, book: Book, tmp_path: Path
+) -> None:
+    (outputs.folder / "gone").symlink_to(tmp_path / "missing", target_is_directory=True)
+    with pytest.raises(ValueError, match="is a link, so nothing was written"):
+        outputs.target("gone/x", book, replace=False)
+    assert not (tmp_path / "missing").exists()
+
+
+def test_a_file_where_an_output_needs_a_folder_is_refused(outputs: Outputs, book: Book) -> None:
+    (outputs.folder / "Silman").write_text("a file")
+    (outputs.folder / "real").mkdir()
+    (outputs.folder / "real" / "Part").write_text("a file")
+    for name in ("Silman/x", "silman/y/z", "real/Part/x"):
+        with pytest.raises(ValueError, match="is not a folder, so nothing was written"):
+            outputs.target(name, book, replace=True)
+    assert sorted(path.name for path in outputs.folder.iterdir()) == [".pgnify", "Silman", "real"]
+    assert [path.name for path in (outputs.folder / "real").iterdir()] == ["Part"]
+
+
+def test_an_output_that_is_a_link_in_a_folder_is_never_written_through(
+    outputs: Outputs, book: Book, tmp_path: Path
+) -> None:
+    (tmp_path / "elsewhere.pgn").write_text("")
+    (outputs.folder / "Silman").mkdir()
+    (outputs.folder / "Silman" / "linked.pgn").symlink_to(tmp_path / "elsewhere.pgn")
+    with pytest.raises(ValueError, match=r"Silman/linked\.pgn is not a plain file"):
+        outputs.target("Silman/linked", book, replace=True)
+
+
+def _written(outputs: Outputs, book: Book, name: str) -> Path:
+    """The file at name, as write_pgn would leave it, with its record."""
+    path = outputs.target(name, book, replace=False)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('[Result "*"]\n\n1. e4 *\n')
+    outputs.wrote(path, book, 1, "")
+    return path
+
+
+def test_a_file_name_in_two_folders_is_two_files(
+    books_folder: Path, outputs: Outputs, book: Book
+) -> None:
+    other = BooksLocation(books_folder).get("openings/Two Pages.PDF")
+    first = _written(outputs, book, "Silman/Games")
+    second = _written(outputs, other, "Rey/games")
+    assert first != second and first.name == "Games.pgn" and second.name == "games.pgn"
+    assert sorted(json.loads((outputs.work / "outputs.json").read_text())) == [
+        "Rey/games.pgn",
+        "Silman/Games.pgn",
+    ]
+    # Neither is the top-level file of the name.
+    assert outputs.target("Games", other, replace=False) == outputs.folder / "Games.pgn"
+
+
+def test_a_path_written_from_another_book_is_replaced_only_when_asked(
+    books_folder: Path, outputs: Outputs, book: Book
+) -> None:
+    other = BooksLocation(books_folder).get("openings/Two Pages.PDF")
+    path = _written(outputs, book, "Silman/Games")
+    assert outputs.target("silman/games", book, replace=False) == path
+    with pytest.raises(
+        ValueError, match=r"Silman/Games\.pgn was written in this session from another book"
+    ):
+        outputs.target("Silman/Games", other, replace=False)
+    assert outputs.target("Silman/Games", other, replace=True) == path
+
+
+def test_a_path_there_before_the_session_is_replaced_only_when_asked(
+    outputs: Outputs, book: Book
+) -> None:
+    (outputs.folder / "Silman").mkdir()
+    (outputs.folder / "Silman" / "Games.pgn").write_text("")
+    with pytest.raises(ValueError, match=r"Silman/Games\.pgn was there before this session"):
+        outputs.target("Silman/Games", book, replace=False)
+    assert outputs.target("Silman/Games", book, replace=True).name == "Games.pgn"
+
+
+def test_a_notes_file_beside_an_output_in_a_folder_is_pgnifys_to_write_over_only(
+    outputs: Outputs, book: Book
+) -> None:
+    (outputs.folder / "Silman").mkdir()
+    (outputs.folder / "Silman" / "forks.notes.md").write_text("My own notes.\n")
+    with pytest.raises(ValueError, match=r"Silman/forks\.notes\.md is not pgnify's"):
+        outputs.target("Silman/forks", book, replace=True)
+
+
+def test_a_notes_file_is_kept_beside_its_pgn_file_in_the_folder(
+    outputs: Outputs, book: Book
+) -> None:
+    path = outputs.target("Silman/Games", book, replace=False)
+    path.parent.mkdir()
+    path.write_text("")
+    outputs.wrote(path, book, 1, "What was left out.")
+    notes = outputs.folder / "Silman" / "Games.notes.md"
+    assert notes.read_text().startswith(NOTES_HEADING)
+    assert "when it wrote Silman/Games.pgn from" in notes.read_text()
+    assert list(outputs.folder.glob("*.md")) == []
+
+
+def test_a_game_saved_from_a_book_is_unwritten_until_a_file_in_a_folder_holds_it(
+    outputs: Outputs, book: Book
+) -> None:
+    games = outputs.book_folder(book).games
+    games.mkdir(parents=True)
+    build_pgn({"moves": move_specs("e4")}, name="a", store=str(games))
+    assert outputs.unwritten(book) == ["a"]
+    path = outputs.target("Silman/Games", book, replace=False)
+    path.parent.mkdir()
+    path.write_text((games / "a.pgn").read_text())
+    outputs.wrote(path, book, ["a"], "")
+    assert outputs.unwritten(book) == []
 
 
 @pytest.mark.parametrize(
