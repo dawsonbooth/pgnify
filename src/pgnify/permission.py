@@ -140,10 +140,15 @@ class Allowances:
         if isinstance(answer, DeclinedElicitation):
             self.refused.add(folded(path))
             return self._refusal(
-                place, "they declined, and pgnify does not ask again in this session", _ELSE
+                place,
+                "they declined, or their client declined without showing them the question, and "
+                "pgnify does not ask again in this session",
+                _ELSE,
             )
         if isinstance(answer, CancelledElicitation):
-            return self._refusal(place, "they cancelled the question", _AGAIN)
+            return self._refusal(
+                place, "they cancelled the question, or their client did without showing it", _AGAIN
+            )
         data = answer.data if isinstance(answer, AcceptedElicitation) else None
         if isinstance(data, Allow):
             if data.allow:

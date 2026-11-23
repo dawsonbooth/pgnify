@@ -67,7 +67,7 @@ These flags set pgnify's folders, and with them it asks nothing. With only one, 
 - `--books`: a book, or a folder of books. pgnify reads nothing else, and the assistant names a book by its path within the folder.
 - `--out`: a folder for pgnify's output alone. pgnify writes nothing anywhere else, and the assistant names a file by its path within the folder, such as `Silman/Part Four`.
 
-A run with nobody to answer, such as a script, needs both flags. Claude Code's print mode (`claude -p`) cancelled pgnify's questions when we tried it, so pgnify refused the request. If a client doesn't support questions, pgnify's error names the flag to start it with.
+A run with nobody to answer, such as a script, needs both flags. Claude Code's print mode (`claude -p`) and its VS Code extension answer pgnify's questions without showing them, so pgnify refuses. For the extension this is a known issue, [anthropics/claude-code#98256](https://github.com/anthropics/claude-code/issues/98256); set both folders there until it is fixed. If a client doesn't support questions, pgnify's error names the flag to start it with.
 
 ### Claude Code
 
