@@ -47,6 +47,22 @@ def test_the_instructions_keep_the_rules_a_scanned_books_validation_showed_were_
     assert rule in instructions.text()
 
 
+# What the model corrects or leaves out is its judgement; what it is unsure of stays as printed.
+@pytest.mark.parametrize(
+    "rule",
+    [
+        "Correct a slip of form where you are sure what the book means, whoever made it",
+        "Its claims and analysis stay as the author made them",
+        "what served only the printed page",
+        "Keep as printed whatever you are unsure of",
+        "what you corrected, with what the book printed",
+    ],
+    ids=["slips-of-form", "claims-as-made", "page-only", "unsure-as-printed", "noted"],
+)
+def test_the_instructions_leave_corrections_and_omissions_to_judgement(rule: str) -> None:
+    assert rule in instructions.text()
+
+
 def test_a_request_puts_the_part_book_and_conventions_before_the_instructions() -> None:
     asked = instructions.request("pocket-primer.epub", "Chapter 1", "one game for each exercise")
     assert asked.startswith("Convert Chapter 1 of the book pocket-primer.epub into PGN")

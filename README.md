@@ -166,7 +166,7 @@ The assistant chooses where each PGN file goes, and pgnify adds `.pgn` if the na
 pgnify writes these files:
 
 - `file_name.pgn`: the games.
-- `file_name.notes.md`, beside it when the assistant gives notes: the model's own account of what it could not resolve, what it left out and the conventions it chose.
+- `file_name.notes.md`, beside it when the assistant gives notes: the model's own account of what it could not resolve, what it corrected and left out, and the conventions it chose.
 - The working folder: `.pgnify/` inside `--out`, or `~/.local/state/pgnify/` without `--out`, which several sessions can share. It holds:
   - a log of every tool call;
   - the book each PGN file came from;
