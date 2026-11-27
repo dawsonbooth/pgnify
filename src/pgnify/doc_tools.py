@@ -49,7 +49,6 @@ def doc_text(
     path: str,
     first_page: int,
     last_page: int | None = None,
-    numbered: bool = False,
     ocr: bool = False,
     out_dir: str | None = None,
 ) -> dict[str, Any]:
@@ -113,7 +112,7 @@ def doc_text(
                 given = reading.of(page, number)
             else:
                 text = page_text(page)
-                given = {"text": _given(text, starts.get(number, frozenset()), numbered)}
+                given = {"text": _given(text, starts.get(number, frozenset()))}
                 if not epub and not page.get_text("text").strip() and page.get_image_info():
                     textless.append(number)
             if pages and size + len(given["text"]) > TEXT_LIMIT:
@@ -310,23 +309,20 @@ def page_text(page: pymupdf.Page) -> str:
     return "".join(parts)
 
 
-def page_lines(path: str, number: int) -> list[str]:
-    """The lines of a page's text, as doc_text numbers them from 1."""
-    with pymupdf.open(path) as doc:
-        return _lines(page_text(_page(doc, number)))
+def lines_of(doc: pymupdf.Document, number: int) -> list[str]:
+    """The lines of a page of the open document, as doc_text gives them."""
+    return _lines(page_text(_page(doc, number)))
 
 
 def _lines(text: str) -> list[str]:
     return text.removesuffix("\n").split("\n") if text else []
 
 
-def _given(text: str, starts: frozenset[int], numbered: bool) -> str:
+def _given(text: str, starts: frozenset[int]) -> str:
     """A page's text as doc_text gives it: an empty line before each line, counted from 0, that
-    starts begins, and with numbered each line numbered from 1, the empty lines unnumbered, so
-    that the numbers stay those of page_lines."""
+    starts begins."""
     return "".join(
-        ("\n" if index in starts else "") + (f"{index + 1}| " if numbered else "") + line + "\n"
-        for index, line in enumerate(_lines(text))
+        ("\n" if index in starts else "") + line + "\n" for index, line in enumerate(_lines(text))
     )
 
 

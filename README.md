@@ -133,7 +133,7 @@ Ask for one part at a time, such as a chapter or a section. The largest part tri
 
 pgnify supports a format when its tools give your assistant everything a conversion needs: the book's text, its pages as pictures, its diagrams read as positions, and a legality check of every move. That much is pgnify's, and it is the same whatever the model. How faithful a conversion turns out also depends on the model and the client: whether the model reads small marks and figurines correctly, uses what the book itself explains, such as its key to symbols, follows the conversion instructions and checks its own work. Two models given the same tools can convert the same pages differently, and `pgnify report` checks only part of the result.
 
-Tried so far, with Claude Sonnet 5.5 in Claude Code: EPUBs, one of them whole; born-digital PDFs, whether their diagrams are set in a chess font or are pictures; and scanned PDFs, whether their text layer is a machine reading or they have none. Each kind of PDF was tried on part of a book, not yet on a whole one. The misses that recurred were the model's: letters in its comments where the book prints figurines, as a PDF's text layer may give them; a variation the book gives in its prose kept as words; and on scans, an evaluation mark read as its look-alike, ∓ for ⩱, and now and then a move read as another legal one.
+Tried so far, with Claude Sonnet 5.5 in Claude Code: EPUBs, one of them whole; born-digital PDFs, whether their diagrams are set in a chess font or are pictures; and scanned PDFs, whether their text layer is a machine reading or they have none. Each kind of PDF was tried on part of a book, not yet on a whole one. The misses that recurred were the model's: a variation the book gives in its prose kept as words; and on scans, an evaluation mark read as its look-alike, ∓ for ⩱, and now and then a move read as another legal one.
 
 [The benchmark](docs/benchmark.md) compares Claude models, effort levels and workflows by faithfulness and cost on three book extracts. Sonnet 5.5 at medium effort was never measurably less faithful than at high effort, and cost less. No model, effort or workflow was reliably more faithful than Sonnet 5.5 at high effort. All left faults, so check the result.
 
@@ -150,9 +150,9 @@ pgnify supports two kinds of assistant, and says which it has tried:
 
   - **OCR misses and corrupts chess notation.** Tesseract reads no figurines, evaluation marks or other chess signs, and can misread or drop an exercise's number or another short label. The moves of a scanned book come out partly unread or wrong, and legality alone cannot tell which.
   - **Leaving a board out of an OCR reading does not mean the text around it was all read.**
-  - **OCR text has none of the text layer's checks.** `pgnify report` compares the comments with a page's text layer, never with an OCR reading, and no span copies from one. The page itself stays available: `doc_page` shows it as printed, for an assistant or a person who can look.
+  - **OCR text has none of the text layer's checks.** `pgnify report` compares the comments with a page's text layer, never with an OCR reading, and no copy reads one. The page itself stays available: `doc_page` shows it as printed, for an assistant or a person who can look.
   - **Board finding has limits.** It finds only boards printed in a frame, not a board without one or printed in part. The places it lists as unread can include a frame that holds no board, such as a photograph's. The text it gives beside a board can be incomplete: a caption further than a third of the board's side away is not given, and on a scan Tesseract can cut a caption or miss a label.
-  - **Chess fonts stay codes.** A book whose diagrams are set in a chess font has its boards found and read, but the figurines in its moves stay the font's codes.
+  - **Chess fonts stay codes.** A book whose diagrams are set in a chess font has its boards found and read, but `doc_text` gives its figurines and marks as the font's codes; `build_pgn` writes a figurine's letter in comments only where the model gives its code in `pieces`.
 
   So a text-only assistant may be unable to settle a scanned book's notation without a model or a tool that reads it from the page. Its support for scanned books is partial, and no text-only assistant has converted a book yet.
 
@@ -235,15 +235,15 @@ pgnify checks every path the assistant gives it, but it is not a sandbox:
 
 Use pgnify on books you own, for your own study. A PGN made with it holds the book's chess prose word for word, so treat it as you would a copy of the book, and don't share it unless you have the right to. pgnify never downloads, shares or publishes books. The only book in this repository is a short book written as a test fixture and dedicated to the public domain.
 
-## Experimental: copying comments from the book
+## Copying comments from the book
 
-A span is a passage of the book's text, named by its page and line numbers. With `pgnify serve --spans`, `doc_text` numbers each page's lines, and `build_pgn` can copy a comment from the book by its spans, so that the model need not retype it. The option is off by default until a run shows a model using it well. On a scanned book, a span copies whatever misreadings the scan's text layer has. An OCR reading has no line numbers, so no span copies from it.
+`build_pgn` can copy a comment from the book, so that the model need not retype it. The model names the page, the words a passage begins with and the words it ends with, which in an EPUB may be on the next page, and `build_pgn` copies the passage exactly, or fails and copies nothing. In an EPUB it keeps the book's paragraph breaks; a PDF has no such marks, and a copy there stays on its page, with the model setting its paragraphs apart. A copy can correct a misprint with a fix, and `build_pgn` reports each copy, each fix, and any passage copied twice within one build. Given each figurine's piece letter, from the book's key, as `pieces`, `build_pgn` writes the letters for the figurines in every comment, whether a picture, a Unicode figurine or a chess font's code. On a scanned book, a copy has whatever misreadings the scan's text layer has, and an OCR reading is never copied from.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `pgnify serve [--books PATH] [--out DIR] [--spans]` | runs the MCP server on stdin and stdout, and asks you about any book or folder that `--books` or `--out` doesn't set |
+| `pgnify serve [--books PATH] [--out DIR]` | runs the MCP server on stdin and stdout, and asks you about any book or folder that `--books` or `--out` doesn't set |
 | `pgnify report DIR [--images] [--coverage PAGES]` | checks the PGN files in a folder that pgnify wrote to |
 | `pgnify check FILE.pgn [--book BOOK]` | checks one PGN file |
 | `pgnify setup [--from DIR]` | installs the diagram reader's weights |

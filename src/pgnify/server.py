@@ -13,7 +13,7 @@ takes it.
 The server runs calls one at a time, since PyMuPDF is not thread-safe and a model may send
 several at once. It passes a tool's failure to the model with its reason, the server's folders
 shown as <books> and <out>, and logs every call in its working folder, for `pgnify report`.
-With --spans, doc_text numbers its lines and build_pgn can copy spans of them (spans.py)."""
+build_pgn copies the passages of the book that a comment names (copies.py)."""
 
 import functools
 import inspect
@@ -32,7 +32,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult, TextContent
 from pydantic import BeforeValidator, Field
 
-from pgnify import __version__, chess_tools, diagram_tools, doc_tools, instructions, spans
+from pgnify import __version__, chess_tools, copies, diagram_tools, doc_tools, instructions
 from pgnify.books import AskedBooks, Book, BooksLocation
 from pgnify.outputs import Outputs, own_folder
 from pgnify.permission import CANNOT_ASK, Allow, CannotAsk, can_ask
@@ -90,9 +90,7 @@ character except control and formatting characters.""",
 )
 
 
-def build_server(
-    books: Path | None, out: Path | None, spanned: bool = False, state: Path | None = None
-) -> MCPServer:
+def build_server(books: Path | None, out: Path | None, state: Path | None = None) -> MCPServer:
     """The server for the books at books, or those the person allows when it is None, and the
     output folder out, or the folders the person allows. Without out it keeps its records in
     state, pgnify's own folder by default."""
@@ -147,9 +145,7 @@ def build_server(
     ) -> dict[str, Any]:
         def extract(b: Book) -> dict[str, Any]:
             images = str(outputs.book_folder(b).images)
-            return doc_tools.doc_text(
-                str(b.path), first_page, last_page, numbered=spanned, ocr=ocr, out_dir=images
-            )
+            return doc_tools.doc_text(str(b.path), first_page, last_page, ocr=ocr, out_dir=images)
 
         arguments = {"first_page": first_page, "last_page": last_page, "ocr": ocr}
         return calls.run("doc_text", arguments, book, extract, readable=readable)
@@ -257,7 +253,12 @@ def build_server(
         )
 
     def build_pgn(
-        spec: Any, name: str | None = None, book: book_type = None, *, readable: read_type
+        spec: Any,
+        name: str | None = None,
+        book: book_type = None,
+        pieces: dict[str, str] | None = None,
+        *,
+        readable: read_type,
     ) -> dict[str, Any]:
         def build(b: Book | None) -> dict[str, Any]:
             if name is not None and b is None:
@@ -266,12 +267,10 @@ def build_server(
                 )
             store = str(outputs.book_folder(b).games) if b else None
             figurines = calls.figurines(b)
-            if spanned:
-                path = str(b.path) if b else None
-                return spans.build_pgn(spec, name, store, figurines, book=path)
-            return chess_tools.build_pgn(spec, name, store, figurines)
+            path = str(b.path) if b else None
+            return copies.build_pgn(spec, name, store, figurines, book=path, pieces=pieces)
 
-        arguments = {"name": name, "spec": _spec_summary(spec)}
+        arguments = {"name": name, "spec": _spec_summary(spec), "pieces": pieces}
         return calls.run("build_pgn", arguments, book, build, needs_book=False, readable=readable)
 
     def write_pgn(
@@ -353,20 +352,16 @@ def build_server(
         (write_pgn, FENCED_WRITE_PGN if out is not None else ASKED_WRITE_PGN),
         (read_diagram, diagram_tools.READ_DIAGRAM),
         (doc_info, doc_tools.doc_info.__doc__),
-        (
-            doc_text,
-            spans.doc_text_description() if spanned else doc_tools.doc_text.__doc__,
-        ),
+        (doc_text, doc_tools.doc_text.__doc__),
         (doc_search, doc_tools.doc_search.__doc__),
         (doc_images, doc_tools.doc_images.__doc__),
         (doc_page, doc_tools.doc_page.__doc__),
     ):
         server.add_tool(calls.served(tool), description=description)
-    spec_type = spans.SpannedGameSpec if spanned else chess_tools.GameSpec
     _add_build_pgn(
         server,
-        calls.served(_spec_as_object(build_pgn, spec_type)),
-        spans.build_pgn_description() if spanned else chess_tools.build_pgn.__doc__,
+        calls.served(_spec_as_object(build_pgn, copies.CopyingGameSpec)),
+        copies.build_pgn_description(),
     )
 
     @server.prompt(

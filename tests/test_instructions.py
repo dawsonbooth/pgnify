@@ -28,8 +28,8 @@ def test_the_instructions_leave_the_output_convention_to_the_user() -> None:
         "read every evaluation mark from a close-up",
         "text at the top of a column or a page may continue",
         "assessment the book gives in words stays in its words",
-        "or the whole part you were asked for, complete, audit it against its pages",
-        "which material you checked against the pages, while converting or in the audit",
+        "or the whole part you were asked for, complete, audit it against the book",
+        "which material you checked against the book, while converting or in the audit",
         "nothing is missing only where the audit shows it",
     ],
     ids=[
@@ -61,6 +61,19 @@ def test_the_instructions_keep_the_rules_a_scanned_books_validation_showed_were_
 )
 def test_the_instructions_leave_corrections_and_omissions_to_judgement(rule: str) -> None:
     assert rule in instructions.text()
+
+
+def test_the_instructions_read_a_born_digital_book_from_its_text_and_copy_its_words() -> None:
+    text = instructions.text()
+    assert "are the book's own text: read the book from doc_text" in text
+    assert "look at a page's picture only for what the text does not hold" in text
+    assert "In an EPUB, copy the book's words into comments with build_pgn" in text
+
+
+def test_the_instructions_write_figurines_in_comments_as_letters() -> None:
+    assert (
+        "with each figurine written as its piece's letter: K, Q, R, B or N" in instructions.text()
+    )
 
 
 def test_a_request_puts_the_part_book_and_conventions_before_the_instructions() -> None:

@@ -161,6 +161,21 @@ def reflowed(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 @pytest.fixture(scope="session")
+def lone_picture(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """An EPUB as PyMuPDF lays it out in a book of figurines: its first page ends with a picture
+    alone on a line, a figurine that the second page prints again at its top."""
+    body = "".join(
+        f"<p>Line {line} of the plain prose that fills the page up.</p>" for line in range(14)
+    )
+    body += (
+        '<p>White might continue developing <img src="board.png" alt="R"/> by 10 '
+        '<img src="board.png" alt="R"/> c1 and only then consider the knight manoeuvre.</p>'
+    )
+    body += "".join(f"<p>Next {line} text of the following page.</p>" for line in range(60))
+    return write_text_epub(tmp_path_factory.mktemp("epub") / "lone-picture.epub", body)
+
+
+@pytest.fixture(scope="session")
 def typeset(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """A PDF page whose first line ends in a hyphen that splits a word, as a typesetter
     hyphenates, and whose second holds a compound's hyphen."""

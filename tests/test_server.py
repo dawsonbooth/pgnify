@@ -24,18 +24,16 @@ from pgnify import instructions
 from pgnify.outputs import NOTES_HEADING
 
 
-def _call(
-    books: Path, out: Path, name: str, arguments: dict[str, Any], spanned: bool = False
-) -> CallToolResult:
-    (result,) = call_tools(books, out, [(name, arguments)], spanned)
+def _call(books: Path, out: Path, name: str, arguments: dict[str, Any]) -> CallToolResult:
+    (result,) = call_tools(books, out, [(name, arguments)])
     return result
 
 
-def _tools(books: Path, out: Path, spanned: bool = False) -> dict[str, Tool]:
+def _tools(books: Path, out: Path) -> dict[str, Tool]:
     async def listed(client: Client) -> dict[str, Tool]:
         return {tool.name: tool for tool in (await client.list_tools()).tools}
 
-    return in_session(books, out, listed, spanned)
+    return in_session(books, out, listed)
 
 
 def _text(result: CallToolResult) -> str:
@@ -76,7 +74,7 @@ def test_the_server_serves_the_document_diagram_chess_and_output_tools(
 def test_no_tool_takes_a_parameter_the_server_fills_itself(primer: Path, tmp_path: Path) -> None:
     for tool in _tools(primer, tmp_path).values():
         parameters = set(tool.input_schema["properties"])
-        assert not {"path", "out_dir", "store", "figurines", "numbered"} & parameters, tool.name
+        assert not {"path", "out_dir", "store", "figurines"} & parameters, tool.name
 
 
 def test_build_pgn_describes_its_spec_in_place_not_by_reference(
@@ -88,29 +86,47 @@ def test_build_pgn_describes_its_spec_in_place_not_by_reference(
     assert "$ref" not in spec
     assert spec["type"] == "object"
     assert sorted(spec["properties"]) == ["comment", "headers", "moves", "result", "start_fen"]
-    assert spec["properties"]["moves"]["items"] == {"$ref": "#/$defs/MoveSpec"}
-    assert "MoveSpec" in schema["$defs"]
+    assert spec["properties"]["moves"]["items"] == {"$ref": "#/$defs/CopyingMoveSpec"}
+    assert "CopyingMoveSpec" in schema["$defs"]
 
 
-def test_with_spans_the_server_numbers_lines_and_copies_spans_into_comments(
+def test_the_server_copies_a_passage_of_the_book_into_a_comment(
     primer: Path, tmp_path: Path
 ) -> None:
-    tools = _tools(primer, tmp_path, spanned=True)
-    assert sorted(tools) == sorted(_tools(primer, tmp_path))
-    text = _call(primer, tmp_path, "doc_text", {"first_page": 9}, spanned=True)
-    assert "7| If Black pushes" in text.structured_content["pages"][0]["text"]
-    span = {"page": 9, "line": 7, "first": "If Black", "last": "instead,"}
-    spec = {"moves": [{"san": "e4", "comment": [span]}]}
-    built = _call(primer, tmp_path, "build_pgn", {"spec": spec, "name": "g"}, spanned=True)
+    copy = {"page": 9, "from": "If Black", "to": "instead,"}
+    spec = {"moves": [{"san": "e4", "comment": [copy]}]}
+    built = _call(primer, tmp_path, "build_pgn", {"spec": spec, "name": "g"})
     assert not built.is_error, built.content
     assert built.structured_content["saved"] == "g"
+    assert built.structured_content["copied"][0]["words"] == 6
     (saved,) = (tmp_path / ".pgnify" / "books").glob("*/games/g.pgn")
     assert "If Black pushes with 2...h3 instead," in saved.read_text()
 
 
-def test_without_spans_doc_text_numbers_no_lines(primer: Path, tmp_path: Path) -> None:
-    text = _call(primer, tmp_path, "doc_text", {"first_page": 9})
-    assert "| If Black" not in text.structured_content["pages"][0]["text"]
+def test_build_pgn_says_how_a_comment_copies_from_the_book(primer: Path, tmp_path: Path) -> None:
+    description = _tools(primer, tmp_path)["build_pgn"].description or ""
+    assert "a copy of the book's words" in description
+    assert "fix, optional" in description
+    said = " ".join(description.split())
+    assert "in a PDF, or where an EPUB's page ends with a picture, a copy stays on its page" in said
+    assert "pieces, optional" in description
+
+
+def test_build_pgn_takes_pieces_and_applies_them_to_the_comments_it_copies(
+    primer: Path, tmp_path: Path
+) -> None:
+    schema = _tools(primer, tmp_path)["build_pgn"].input_schema
+    assert schema["properties"]["pieces"]["anyOf"][0]["type"] == "object"
+    copy = {"page": 10, "from": "1.d6", "to": "2.\u2654e6"}
+    spec = {"moves": [{"san": "e4", "comment": [copy]}]}
+    built = _call(
+        primer, tmp_path, "build_pgn", {"spec": spec, "pieces": {"\u2656": "R", "\u2654": "K"}}
+    )
+    assert not built.is_error, built.content
+    assert "1.d6 Rb1! 2.Ke6" in built.structured_content["pgn"]
+    refused = _call(primer, tmp_path, "build_pgn", {"spec": spec, "pieces": {"\u2656": "X"}})
+    assert refused.is_error
+    assert "not one of K, Q, R, B or N" in str(refused.content)
 
 
 def test_validate_moves_replays_a_line_through_the_server(primer: Path, tmp_path: Path) -> None:
@@ -219,6 +235,19 @@ def test_the_log_keeps_whether_doc_text_read_by_ocr(primer: Path, tmp_path: Path
     call_tools(primer, tmp_path, [("doc_text", {"first_page": 9})])
     (entry,) = [json.loads(line) for line in (tmp_path / ".pgnify" / "log.jsonl").open()]
     assert entry["arguments"] == {"first_page": 9, "last_page": None, "ocr": False}
+
+
+def test_the_log_keeps_the_pieces_build_pgn_was_given(primer: Path, tmp_path: Path) -> None:
+    pieces = {"\u2656": "R"}
+    call_tools(
+        primer, tmp_path, [("build_pgn", {"spec": {"comment": "A \u2656."}, "pieces": pieces})]
+    )
+    (entry,) = [json.loads(line) for line in (tmp_path / ".pgnify" / "log.jsonl").open()]
+    assert entry["arguments"] == {
+        "name": None,
+        "spec": {"start_fen": None, "moves": 0},
+        "pieces": pieces,
+    }
 
 
 @pytest.mark.live

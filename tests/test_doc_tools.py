@@ -24,7 +24,6 @@ from pgnify.doc_tools import (
     doc_page,
     doc_search,
     doc_text,
-    page_lines,
 )
 
 PICTURES = PRIMER / "OEBPS" / "images"
@@ -149,10 +148,10 @@ KNIGHT = (
 FIGURINE = '<img src="board.png" alt="N" style="width:8px;height:8px"/>'
 
 
-def epub_text(tmp_path: Path, body: str, numbered: bool = False) -> list[str]:
+def epub_text(tmp_path: Path, body: str) -> list[str]:
     """The text of each page doc_text gives for an EPUB of the body."""
     epub = str(write_text_epub(tmp_path / "book.epub", body))
-    pages = doc_text(epub, 1, doc_info(epub)["page_count"], numbered=numbered)["pages"]
+    pages = doc_text(epub, 1, doc_info(epub)["page_count"])["pages"]
     return [page["text"] for page in pages]
 
 
@@ -190,16 +189,6 @@ def test_doc_text_begins_a_paragraph_at_a_figurine_that_opens_it_not_at_one_insi
     assert re.fullmatch(
         rf"\n{picture}f3 develops a piece\.\n\nAfter 1 e4 e5 2 {picture}f3 hits e5\.\n", text
     ), text
-
-
-def test_doc_text_numbers_an_epubs_lines_as_spans_name_them_beside_its_paragraphs(
-    tmp_path: Path,
-) -> None:
-    (text,) = epub_text(tmp_path, KNIGHT, numbered=True)
-    numbered = [line for line in text.splitlines() if line]
-    lines = page_lines(str(tmp_path / "book.epub"), 1)
-    assert numbered == [f"{index}| {line}" for index, line in enumerate(lines, start=1)]
-    assert text.startswith("\n1| The Knight\n\n2| ")
 
 
 def test_doc_text_adds_no_empty_line_to_a_pdf(two_pages: Path) -> None:
@@ -493,14 +482,6 @@ def test_doc_text_with_ocr_reads_pages_in_order_ten_at_most_and_says_where_to_go
     result = doc_text(path, 1, 2, ocr=True)
     assert [page["page"] for page in result["pages"]] == [1]
     assert result["next_page"] == 2
-
-
-@needs_tesseract
-def test_doc_text_numbers_no_line_of_an_ocr_reading(tmp_path: Path) -> None:
-    book = str(scanned_text(tmp_path, [[SENTENCE]], hidden="A different sentence entirely."))
-    assert doc_text(book, 1, numbered=True)["pages"][0]["text"].startswith("1| ")
-    numbered = doc_text(book, 1, numbered=True, ocr=True, out_dir=str(tmp_path))
-    assert numbered["pages"][0]["text"] == SENTENCE + "\n"
 
 
 @needs_tesseract

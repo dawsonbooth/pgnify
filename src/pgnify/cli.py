@@ -56,10 +56,6 @@ def serve(
             "records then go in ~/.local/state/pgnify/."
         ),
     ] = None,
-    spans: Annotated[
-        bool,
-        typer.Option(help="Experimental: number doc_text's lines, and let build_pgn copy them."),
-    ] = False,
 ) -> None:
     """Run the MCP server on stdin and stdout.
 
@@ -68,7 +64,7 @@ def serve(
     from pgnify.server import build_server
 
     try:
-        server = build_server(books, out, spanned=spans)
+        server = build_server(books, out)
     except _FAILURES as error:
         _fail("serve", error)
     server.run("stdio")

@@ -9,13 +9,18 @@ them: a place in which it reads no board is dropped. What stands beside each boa
 the page's text layer, or, where the page has none, from Tesseract's reading of the strips
 beside the board (tesseract.py)."""
 
+import atexit
+import collections
+import contextlib
 import importlib.util
 import io
 import json
+import queue
 import subprocess
 import sys
+import threading
 from pathlib import Path
-from typing import Any
+from typing import IO, Any
 
 import chess
 import pymupdf
@@ -28,9 +33,15 @@ NEEDED = ("torch", "torchvision", "cv2", "skimage", "PIL", "numpy")
 # A square read with less confidence than this is reported as a doubt. On clean diagrams every
 # square reads above 0.99; on a scan's dark squares, as low as 0.3.
 DOUBT_BELOW = 0.9
-# Seconds a call's readings may take: the reader loads its models from disk at every call, which
-# takes longest on the first, and reads a page's places in about half a second each.
+# Seconds one request's reading may take: the reader loads its models from disk at the first
+# request that reads a board, which takes longest, and reads a page's places in about half a
+# second each.
 TIMEOUT = 600
+# Seconds without a request after which the reader's process ends, which frees the memory its
+# models hold, about a gigabyte; the next request starts a new one.
+IDLE = 300
+# How many of the reader's last lines on stderr are kept to say why it failed.
+STDERR_LINES = 20
 # The widths over heights a board may have, as the search in recogniser/frames.py takes them.
 SQUARE = (0.85, 1.18)
 # Text within this share of a board's side of it stands beside it.
@@ -260,19 +271,130 @@ def _found(
     return found
 
 
+class _Reader:
+    """One reader process, with threads that take its answers and its stderr off their pipes, so
+    that the wait for an answer can time out and the stderr pipe can never fill."""
+
+    def __init__(self) -> None:
+        self.command = _command()
+        self.process = subprocess.Popen(
+            self.command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        assert self.process.stdin and self.process.stdout and self.process.stderr
+        self.stdin = self.process.stdin
+        # Each line of stdout, then None at its end.
+        self.answers: queue.Queue[str | None] = queue.Queue()
+        self.stderr: collections.deque[str] = collections.deque(maxlen=STDERR_LINES)
+        self.threads = [
+            threading.Thread(target=self._take, args=(self.process.stdout,), daemon=True),
+            threading.Thread(target=self._keep, args=(self.process.stderr,), daemon=True),
+        ]
+        for thread in self.threads:
+            thread.start()
+        # How many requests it has had, which tells an idle timer whether any came since.
+        self.requests = 0
+
+    def _take(self, stream: IO[str]) -> None:
+        for line in stream:
+            self.answers.put(line)
+        self.answers.put(None)
+
+    def _keep(self, stream: IO[str]) -> None:
+        for line in stream:
+            if line.strip():
+                self.stderr.append(line.strip())
+
+    def ask(self, request: dict[str, Any]) -> dict[str, Any]:
+        """The answer to one request: RuntimeError if the process ends before it answers, and
+        TimeoutExpired if it takes longer than TIMEOUT."""
+        self.requests += 1
+        try:
+            self.stdin.write(json.dumps(request) + "\n")
+            self.stdin.flush()
+        except OSError:  # it has ended; the wait below says how
+            pass
+        try:
+            line = self.answers.get(timeout=TIMEOUT)
+        except queue.Empty:
+            raise subprocess.TimeoutExpired(self.command, TIMEOUT) from None
+        if line is None:
+            self.process.wait()
+            self.threads[1].join(timeout=1)  # the last of its stderr
+            last = self.stderr[-1] if self.stderr else "no message"
+            raise RuntimeError(f"the diagram reader failed: {last}")
+        return json.loads(line)
+
+    def stop(self) -> None:
+        """Kill the process and close its pipes."""
+        self.process.kill()
+        self.process.wait()
+        for thread in self.threads:
+            thread.join(timeout=1)
+        for stream in (self.stdin, self.process.stdout, self.process.stderr):
+            if stream:
+                # A pipe to a process that has ended may fail to flush as it closes.
+                with contextlib.suppress(OSError):
+                    stream.close()
+
+
+# The reader that serves every call, started at the first, and the timer that ends it after IDLE
+# seconds without a request. _lock keeps concurrent calls from interleaving their requests.
+_lock = threading.Lock()
+_reader: _Reader | None = None
+_idle: threading.Timer | None = None
+
+
+def _command() -> list[str]:
+    """The command that starts the reader."""
+    return [sys.executable, "-m", "pgnify.recogniser", "--weights", str(weights.folder())]
+
+
 def _run(requests: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """The reader's answers to the requests, in order, from one process."""
-    process = subprocess.run(
-        [sys.executable, "-m", "pgnify.recogniser", "--weights", str(weights.folder())],
-        input="".join(json.dumps(request) + "\n" for request in requests),
-        capture_output=True,
-        text=True,
-        timeout=TIMEOUT,
-    )
-    if process.returncode != 0:
-        last = process.stderr.strip().splitlines()[-1:] or ["no message"]
-        raise RuntimeError(f"the diagram reader failed: {last[0]}")
-    return [json.loads(line) for line in process.stdout.splitlines()]
+    """The reader's answers to the requests, in order, from the one process that serves every
+    call. A process that ends, fails or takes longer than TIMEOUT over a request is killed, and
+    the next call starts a new one, as does one that ended between calls. An empty list of
+    requests starts none."""
+    global _reader, _idle
+    if not requests:
+        return []
+    with _lock:
+        if _idle:
+            _idle.cancel()
+        if _reader and _reader.process.poll() is not None:
+            _discard()  # it ended while idle: asking it would fail on a broken pipe
+        try:
+            if _reader is None:
+                _reader = _Reader()
+            answers = [_reader.ask(request) for request in requests]
+        except BaseException:
+            _discard()  # its next answer could be one to this call's request
+            raise
+        _idle = threading.Timer(IDLE, _expire, args=(_reader, _reader.requests))
+        _idle.daemon = True
+        _idle.start()
+        return answers
+
+
+def _expire(reader: _Reader, requests: int) -> None:
+    """End the reader if it has had no request since its count was requests."""
+    with _lock:
+        if _reader is reader and reader.requests == requests:
+            _discard()
+
+
+def _discard() -> None:
+    """End the reader's process, if there is one."""
+    global _reader
+    reader, _reader = _reader, None
+    if reader:
+        reader.stop()
+
+
+atexit.register(_discard)
 
 
 def _reading(reading: dict[str, Any]) -> dict[str, Any]:

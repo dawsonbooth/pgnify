@@ -119,7 +119,6 @@ def in_session[T](
     books: Path | None,
     out: Path | None,
     act: Callable[[Client], Awaitable[T]],
-    spanned: bool = False,
     *,
     state: Path | None = None,
     person: Person | None = None,
@@ -130,7 +129,7 @@ def in_session[T](
     is None. With a person the client can ask questions, and speaks the protocol of the era."""
 
     async def run() -> T:
-        server = build_server(books, out, spanned=spanned, state=state)
+        server = build_server(books, out, state=state)
         async with Client(server, mode=era, elicitation_callback=person) as client:
             return await act(client)
 
@@ -141,7 +140,6 @@ def call_tools(
     books: Path | None,
     out: Path | None,
     calls: list[tuple[str, dict[str, Any]]],
-    spanned: bool = False,
     *,
     state: Path | None = None,
     person: Person | None = None,
@@ -152,7 +150,7 @@ def call_tools(
     async def call(client: Client) -> list[CallToolResult]:
         return [await client.call_tool(name, arguments) for name, arguments in calls]
 
-    return in_session(books, out, call, spanned, state=state, person=person, era=era)
+    return in_session(books, out, call, state=state, person=person, era=era)
 
 
 # The four kinds of PDF pgnify reads, made small: a scan whose text ClearScan replaced, a scan with

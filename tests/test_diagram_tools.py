@@ -2,7 +2,10 @@
 models/."""
 
 import itertools
-from collections.abc import Callable
+import subprocess
+import sys
+import time
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import chess
@@ -20,9 +23,9 @@ from support import (
     stored_sideways,
 )
 
-from pgnify import tesseract
+from pgnify import diagram_tools, tesseract
 from pgnify.chess_tools import render_board
-from pgnify.diagram_tools import problems, read_diagram, read_page, settle
+from pgnify.diagram_tools import _run, problems, read_diagram, read_page, settle
 from pgnify.doc_tools import doc_page, doc_text
 
 pytestmark = pytest.mark.usefixtures("checkout_weights")
@@ -264,6 +267,139 @@ def test_the_search_finds_a_board_whose_frame_a_scan_broke_by_two_of_its_lines()
         page[top : top + 30, 547:550] = 0
     (pair,) = [place for place in frames.candidates(page) if place["found_by"] == "two lines"]
     assert all(abs(a - b) <= 3 for a, b in zip(pair["box"], [150, 200, 550, 600], strict=True))
+
+
+# A stand-in for the reader, which answers each request line with its own process id, unless the
+# picture names what to do: "die" exits with 3 after a message, "hang" waits, and "noisy" writes
+# a megabyte to stderr, far more than a pipe holds, before it answers.
+STAND_IN = """
+import json, os, sys, time
+for line in sys.stdin:
+    picture = json.loads(line)["picture"]
+    if picture == "die":
+        print("first line", file=sys.stderr)
+        print("it died", file=sys.stderr)
+        sys.exit(3)
+    if picture == "hang":
+        time.sleep(60)
+    if picture == "noisy":
+        print("x" * 1000 * 1000, file=sys.stderr)
+    print(json.dumps({"pid": os.getpid()}), flush=True)
+"""
+
+
+@pytest.fixture
+def stand_in(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[None]:
+    """Starts a stand-in for the reader, not one that loads models, and ends it afterwards. A
+    real reader that an earlier test left is ended first, so that no call reaches it."""
+    diagram_tools._discard()
+    script = tmp_path / "reader.py"
+    script.write_text(STAND_IN)
+    monkeypatch.setattr(diagram_tools, "_command", lambda: [sys.executable, str(script)])
+    yield
+    diagram_tools._discard()
+
+
+def _pid(picture: str = "ok") -> int:
+    [answer] = _run([{"picture": picture}])
+    return answer["pid"]
+
+
+def test_consecutive_reads_use_one_reader_process(stand_in: None) -> None:
+    first = _pid()
+    assert _pid() == first
+    assert [answer["pid"] for answer in _run([{"picture": "a"}, {"picture": "b"}])] == [first] * 2
+
+
+def test_a_reader_that_dies_is_reported_with_its_last_message_and_the_next_read_starts_another(
+    stand_in: None,
+) -> None:
+    first = _pid()
+    with pytest.raises(RuntimeError, match=r"^the diagram reader failed: it died$"):
+        _pid("die")
+    assert _pid() != first
+
+
+def test_a_reader_that_hangs_past_the_timeout_is_killed_and_the_next_read_starts_another(
+    stand_in: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(diagram_tools, "TIMEOUT", 0.5)
+    first = _pid()
+    assert diagram_tools._reader
+    process = diagram_tools._reader.process
+    with pytest.raises(subprocess.TimeoutExpired):
+        _pid("hang")
+    assert process.poll() is not None
+    assert diagram_tools._reader is None
+    assert _pid() != first
+
+
+def test_a_reader_that_writes_much_to_stderr_is_not_blocked_and_keeps_the_end_of_it(
+    stand_in: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A blocked reader fails the test in seconds, not after the timeout's ten minutes.
+    monkeypatch.setattr(diagram_tools, "TIMEOUT", 30)
+    _pid("noisy")
+    assert _pid("noisy") > 0
+    with pytest.raises(RuntimeError, match="the diagram reader failed: it died"):
+        _pid("die")
+
+
+def test_the_reader_ends_after_it_has_had_no_request_for_the_idle_time(
+    stand_in: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(diagram_tools, "IDLE", 0.2)
+    first = _pid()
+    assert diagram_tools._reader
+    process = diagram_tools._reader.process
+    deadline = time.monotonic() + 10
+    while process.poll() is None and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert process.poll() is not None
+    assert diagram_tools._reader is None
+    assert _pid() != first
+
+
+def test_a_request_within_the_idle_time_keeps_the_reader(
+    stand_in: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # No waiting: the idle time is far off, and what ends the reader is called by hand.
+    monkeypatch.setattr(diagram_tools, "IDLE", 600)
+    first = _pid()
+    reader, timer = diagram_tools._reader, diagram_tools._idle
+    assert reader and timer
+    assert _pid() == first
+    assert diagram_tools._reader is reader
+    # The request cancelled the timer that was running, and started another.
+    assert timer.finished.is_set() and diagram_tools._idle is not timer
+    # The timer of the first request, firing late, finds a request since and leaves the reader.
+    diagram_tools._expire(reader, 1)
+    assert diagram_tools._reader is reader and reader.process.poll() is None
+    diagram_tools._expire(reader, reader.requests)
+    assert diagram_tools._reader is None and reader.process.poll() is not None
+
+
+def test_a_reader_that_ended_between_calls_is_replaced_without_an_error(stand_in: None) -> None:
+    first = _pid()
+    assert diagram_tools._reader
+    diagram_tools._reader.process.kill()
+    diagram_tools._reader.process.wait()
+    assert _pid() != first
+
+
+def test_no_request_starts_no_reader(stand_in: None) -> None:
+    assert _run([]) == []
+    assert diagram_tools._reader is None
+
+
+def test_stopping_a_reader_whose_pipe_is_broken_raises_nothing(stand_in: None) -> None:
+    _pid()
+    reader = diagram_tools._reader
+    assert reader
+    reader.process.kill()
+    reader.process.wait()
+    reader.stdin.write("pending")  # buffered: closing the broken pipe flushes it and fails
+    reader.stop()
 
 
 @pytest.mark.live
