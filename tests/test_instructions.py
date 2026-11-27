@@ -70,6 +70,10 @@ def test_the_instructions_read_a_born_digital_book_from_its_text_and_copy_its_wo
     assert "In an EPUB, copy the book's words into comments with build_pgn" in text
 
 
+def test_the_instructions_offer_building_a_game_a_part_at_a_time() -> None:
+    assert "You can build a game as you read it, a part at a time" in instructions.text()
+
+
 def test_the_instructions_write_figurines_in_comments_as_letters() -> None:
     assert (
         "with each figurine written as its piece's letter: K, Q, R, B or N" in instructions.text()

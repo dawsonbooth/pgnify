@@ -8,9 +8,9 @@ each book's place in the output folder. pgnify keeps its records in .pgnify/ the
 folder (permission.py); a yes covers the folder and the folders inside it, by their real paths.
 pgnify keeps its records in its own folder, ~/.local/state/pgnify/, with the same layout:
 
-- books/<key>/, a folder for each book, holding the games saved from it, the pictures extracted
-  from it and the pages shown from it, and the pieces its figurines were read as, so that two
-  books never share them;
+- books/<key>/, a folder for each book, holding the games saved from it and the spec each was built
+  from, the pictures extracted from it and the pages shown from it, and the pieces its figurines
+  were read as, so that two books never share them;
 - outputs.json, the book each PGN file was written from, and from which saved games, by the
   file's path in the output folder, or its full real path in pgnify's own folder;
 - log.jsonl, every tool call, for `pgnify report`.
@@ -457,13 +457,14 @@ def _records(file: Path) -> dict[str, Any]:
     return json.loads(file.read_text(encoding="utf-8")) if file.exists() else {}
 
 
-def replace_json(path: Path, value: Any) -> None:
+def replace_json(path: Path, value: Any, sort_keys: bool = True) -> None:
     """Write a JSON file whole, through a temporary file, so that it is never found half
-    written. Where another process has the file open, as on Windows, it tries a few times."""
+    written, its keys sorted unless sort_keys is false. Where another process has the file open,
+    as on Windows, it tries a few times."""
     written = path.with_name(f"{path.name}.{os.getpid()}.new")
     # write_text would follow a link planted at the temporary name.
     written.unlink(missing_ok=True)
-    text = json.dumps(value, indent=1, sort_keys=True, ensure_ascii=False) + "\n"
+    text = json.dumps(value, indent=1, sort_keys=sort_keys, ensure_ascii=False) + "\n"
     written.write_text(text, encoding="utf-8")
     for attempt in range(_REPLACES):
         try:

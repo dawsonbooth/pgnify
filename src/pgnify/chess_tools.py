@@ -4,11 +4,12 @@ movetext, read figurines from legality, build games from specs and find text pyt
 drops."""
 
 import difflib
+import hashlib
 import io
 import itertools
 import json
 import re
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 from typing import Any, Required, TypedDict
 
@@ -32,6 +33,8 @@ _RESULTS_TEXT = "1-0, 0-1, 1/2-1/2 or *"
 _NAG = re.compile(r"^(\$\d+|[!?]{1,2})$")
 _TOKEN = re.compile(r"[{}();]|[^\s{}();]+")
 _GAME_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,39}")
+# A path in a game, as errors name it: "12b", "3w/v1/3b".
+_GAME_PATH = re.compile(r"\d+[wb](?:/v\d+/\d+[wb])*")
 # A figurine as the model gives it: by its picture's id, [0ebed3], or as doc_text prints it,
 # [picture 3: 0ebed3].
 _PICTURE = re.compile(r"\[(?:picture \d+: )?([0-9a-f]{6})\]")
@@ -469,6 +472,7 @@ def build_pgn(
     name: str | None = None,
     store: str | None = None,
     figurines: str | None = None,
+    after: str | None = None,
 ) -> dict[str, Any]:
     """Build one PGN game from a structured spec, checking every move.
 
@@ -501,9 +505,35 @@ def build_pgn(
     comment's picture that no move reads; give that piece by its letter.
 
     name, optional: save the game under this name, for write_pgn to write from its names, instead
-    of returning its PGN, so that its PGN need not be repeated. Saving under a name again
-    replaces the game saved before; a game with errors is not saved. A name is up to 40 letters,
-    digits, dots, dashes and underscores, starting with a letter or digit.
+    of returning its PGN, so that its PGN need not be repeated. Saving under a name again without
+    after replaces the game saved before, and with after adds to it; a game with errors is not
+    saved. A name is up to 40 letters, digits, dots, dashes and underscores, starting with a
+    letter or digit.
+
+    after, optional, with name: the spec is a part of the game saved under name, played from the
+    position after one of its moves, so that a game can be built as it is read, a part at a time,
+    instead of given whole in one call. after is the path of a move in the saved game, as errors
+    give paths ("12b", "3w/v1/3b", "30w"), or "start" for the game's starting position. The part's
+    moves merge into the saved game along their line: where the saved line goes on, the part's move
+    must be the same move on the board, however it is written, and the two are one node; where the
+    saved line ends, the rest of the part's line is added. A move that is not the saved continuation
+    is refused, with a message that names the saved move: an alternative to it goes in that move's
+    variations. For example, to give 12...Nf6 as an alternative to the saved 12...Nc6, the part
+    after "12w" is {"moves": [{"san": "Nc6", "variations": [[{"san": "Nf6"}]]}]}. On a move both
+    have, the comment and the nags the part gives replace the game's, even when empty, and what the
+    part leaves out stays, so a passage that runs onto the next page can be given again whole. The
+    part's variations on such a move merge with the game's: a line whose first move is the same
+    move as a variation's first move goes into the first such variation that no earlier line of the
+    part went into, and any other line is added after the variations already there. The part's
+    comment replaces the comment on the move after names, or, with "start", the game's comment. A
+    part's result replaces the game's result. headers and start_fen belong to the game's first part,
+    and a later part that gives either is refused. The game is saved only if the whole merged game
+    builds without errors, which name paths as the whole game numbers them; otherwise the game saved
+    before stays as it was. The result is that of a named build of the whole game. The same part
+    given twice gives the game it gave once. A part adds moves and lines but takes none away: to
+    correct a move, build the game again without after. To give a first part again, give it with
+    after "start" and without its headers and start_fen, since a build without after replaces the
+    whole game.
 
     Returns ok; pgn, the game as built, up to any illegal move; errors, each with the path of the
     move that is not legal, or whose comment gives a picture no move reads ("comment" for the
@@ -517,29 +547,40 @@ def build_pgn(
     the game's moves with each comment cut to its first five words, to check where each comment
     sits; and plies, variations and comments, as check_pgn counts them.
     """
-    built = build_game(spec, read_figurines(figurines, besides=name))
+    whole = read_spec(spec)
+    known = read_figurines(figurines, besides=name)
+    if after is not None:
+        record = saved_game(name, store)
+        whole = merge_part(record, whole, after, known | record["pictures"])
+    built = build_game(whole, known)
     if name is None:
         return built
     assert store is not None, "a game saved by name needs a store"
-    return save_built(built, name, store, figurines)
+    return save_built(built, name, store, figurines, {"spec": whole, "pieces": {}})
 
 
 def save_built(
-    built: dict[str, Any], name: str, store: str, figurines: str | None = None
+    built: dict[str, Any],
+    name: str,
+    store: str,
+    figurines: str | None,
+    built_from: dict[str, Any],
 ) -> dict[str, Any]:
     """Save a built game under name in the folder store, for write_pgn to write, and say what
-    was saved. The pieces its pictures were read as are recorded in the file figurines, for
-    calls for other games."""
-    if not _GAME_NAME.fullmatch(name):
-        raise ValueError(
-            f"{name!r} is not a game's name: up to 40 letters, digits, dots, dashes and "
-            "underscores, starting with a letter or digit"
-        )
+    was saved. built_from, the game's spec with its parts merged and its copies unresolved, and
+    the pieces its builds were given, is recorded beside its PGN in <name>.spec.json, with the
+    pictures it read and a hash of its PGN, for a later part of the game. The pieces its pictures
+    were read as are recorded in the file figurines, for calls for other games."""
+    _check_name(name)
     file = Path(store) / f"{name}.pgn"
     replaced = built["ok"] and file.exists()
     if built["ok"]:
         file.parent.mkdir(parents=True, exist_ok=True)
-        file.write_text(built["pgn"].strip("\n") + "\n", encoding="utf-8")
+        text = built["pgn"].strip("\n") + "\n"
+        file.write_text(text, encoding="utf-8")
+        record = {**built_from, "pictures": built.get("pictures", {}), "pgn": _hash(text)}
+        # Unsorted: a later build writes the headers in the order the record keeps them.
+        replace_json(_record_file(store, name), record, sort_keys=False)
         if figurines:
             _record_figurines(figurines, name, built.get("pictures", {}))
     counts = check_pgn(built["pgn"])["games"]
@@ -552,6 +593,239 @@ def save_built(
         **({"pictures": built["pictures"]} if "pictures" in built else {}),
         "errors": built["errors"],
     }
+
+
+def _check_name(name: str) -> None:
+    if not _GAME_NAME.fullmatch(name):
+        raise ValueError(
+            f"{name!r} is not a game's name: up to 40 letters, digits, dots, dashes and "
+            "underscores, starting with a letter or digit"
+        )
+
+
+def _record_file(store: str, name: str) -> Path:
+    """The file beside the game saved as name that keeps what a part of it needs. It is not a PGN
+    file, so no list of saved games holds it."""
+    return Path(store) / f"{name}.spec.json"
+
+
+def _hash(pgn: str) -> str:
+    return hashlib.sha256(pgn.encode("utf-8")).hexdigest()
+
+
+def _saved_names(store: str) -> str:
+    """The names of the games saved in the folder store, sorted and joined, or "none"."""
+    return ", ".join(sorted(file.stem for file in Path(store).glob("*.pgn"))) or "none"
+
+
+def saved_game(name: str | None, store: str | None) -> dict[str, Any]:
+    """The game saved as name in the folder store, for a part: its spec, with the pieces its
+    builds were given and the pictures it read, and start, the board it starts from. ValueError
+    for a part without a name, a name with no game saved, and a game with no record or whose PGN
+    has changed since."""
+    if name is None:
+        raise ValueError(
+            "after adds a part to the game saved under name, so give name; to build a game "
+            "whole, leave after out"
+        )
+    assert store is not None, "a game saved by name needs a store"
+    _check_name(name)
+    file = Path(store) / f"{name}.pgn"
+    if not file.is_file():
+        raise ValueError(
+            f"no game is saved as {name!r}; the games saved are: {_saved_names(store)}. Build the "
+            "game's first part without after, or give the name of a game saved"
+        )
+    text = file.read_text(encoding="utf-8")
+    try:
+        record = json.loads(_record_file(store, name).read_text(encoding="utf-8"))
+        unchanged = record["pgn"] == _hash(text)
+        spec, pieces, pictures = record["spec"], record["pieces"], record["pictures"]
+    except (OSError, ValueError, KeyError, TypeError):
+        unchanged = False
+    if not unchanged:
+        raise ValueError(
+            f"the game saved as {name!r} has no record of the spec it was built from, or its PGN "
+            "has changed since it was saved: build it again without after, whole or as its first "
+            "part"
+        )
+    start = read_games(text)[0].board()
+    return {"spec": spec, "pieces": pieces, "pictures": pictures, "start": start}
+
+
+def merge_part(
+    record: dict[str, Any], part: Any, after: str, known: dict[str, str]
+) -> dict[str, Any]:
+    """The record's spec with the part merged into it after the move at after, as build_pgn
+    describes, or ValueError saying why the part cannot be merged. Pictures are compared as known
+    reads them."""
+    for field in ("headers", "start_fen"):
+        if part.get(field):
+            raise ValueError(
+                f"a part cannot give {field}, which only the game's first part gives: leave "
+                f"{field} out, or build the whole game again without after to change it"
+            )
+    spec = record["spec"]
+    placement = spec.get("start_fen", "")
+    if placement and len(placement.split()) == 1:
+        main = [_split_suffix(move["san"])[0] for move in spec.get("moves", [])]
+        if _start(placement, main, None, known)[1] == "deduced":
+            # Where one side alone could play the saved line, the merged game keeps that side, so
+            # that a part's illegal move is found at its own place; any other placement is left
+            # for the merged line to decide, as a whole build would.
+            spec["start_fen"] = record["start"].fen()
+    if after == "start":
+        line, offset, board = spec.setdefault("moves", []), 0, record["start"].copy()
+        prefix = ""
+        if "comment" in part:
+            spec["comment"] = part["comment"]
+    else:
+        node, line, index, board, prefix = _locate(spec, after, record["start"], known)
+        offset = index + 1
+        if "comment" in part:
+            node["comment"] = part["comment"]
+    _merge_line(line, offset, part.get("moves", []), board, prefix, known)
+    if "result" in part:
+        spec["result"] = part["result"]
+    return spec
+
+
+def _possible_moves(board: chess.Board, san: str, known: dict[str, str]) -> list[chess.Move]:
+    """The moves san can be on the board: with every picture read by known, at most one; with a
+    picture known does not read, one for each piece under which the move is legal."""
+    san = _split_suffix(san)[0]
+    unknown = list(dict.fromkeys(p for p in _PICTURE.findall(san) if p not in known))
+    moves: list[chess.Move] = []
+    for pieces in itertools.product(_PIECES, repeat=len(unknown)):
+        reading = {**known, **dict(zip(unknown, pieces, strict=True))}
+        try:
+            move = _parse(board, _pictured(san, reading), marks=False)
+        except ValueError:
+            continue
+        if move not in moves:
+            moves.append(move)
+    return moves
+
+
+def _saved_move(board: chess.Board, san: str, known: dict[str, str]) -> chess.Move:
+    """The move a saved game's san is on the board, as known reads its pictures."""
+    return _parse(board, _pictured(_split_suffix(san)[0], known), marks=False)
+
+
+def _locate(
+    spec: dict[str, Any], after: str, start: chess.Board, known: dict[str, str]
+) -> tuple[dict[str, Any], list[Any], int, chess.Board, str]:
+    """The move of the saved spec that the path after names, its line and its place in it, the
+    board after it, and the prefix of the paths of its line's moves."""
+    if not _GAME_PATH.fullmatch(after):
+        raise ValueError(
+            f"after {after!r} is not a path: give a move's path as errors give it, such as "
+            '"12b", "30w" or "3w/v1/3b", or "start" for the starting position'
+        )
+    segments = after.split("/")
+    line, board, prefix = spec.get("moves", []), start.copy(), ""
+    for position in range(0, len(segments), 2):
+        segment = segments[position]
+        first, last = _move_path(board, 0), _move_path(board, len(line) - 1)
+        index = 0
+        while index < len(line) and _move_path(board, 0) != segment:
+            board.push(_saved_move(board, line[index]["san"], known))
+            index += 1
+        if index == len(line):
+            there = f"the saved game's line {prefix.rstrip('/')}" if prefix else "its main line"
+            has = f"has the moves {first} to {last}" if line else "has no moves"
+            raise ValueError(f"the saved game has no move {prefix}{segment}: {there} {has}")
+        node = line[index]
+        if position + 1 < len(segments):
+            number = int(segments[position + 1][1:])
+            variations = node.get("variations", [])
+            if not 1 <= number <= len(variations):
+                if len(variations) > 1:
+                    have = f"its variations are v1 to v{len(variations)}"
+                else:
+                    have = "its only variation is v1" if variations else "it has none"
+                raise ValueError(
+                    f"the saved game's move {prefix}{segment} has no variation v{number}: {have}"
+                )
+            line, prefix = variations[number - 1], f"{prefix}{segment}/v{number}/"
+    board.push(_saved_move(board, node["san"], known))
+    return node, line, index, board, prefix
+
+
+def _merge_line(
+    line: list[Any],
+    offset: int,
+    part: list[Any],
+    board: chess.Board,
+    prefix: str,
+    known: dict[str, str],
+) -> None:
+    """Merge the moves of part into line from line's move at index offset: board is the position
+    before that move, and prefix begins the paths of line's moves."""
+    for index, move in enumerate(part):
+        if offset + index >= len(line):
+            line.extend(part[index:])
+            return
+        node, path = line[offset + index], prefix + _move_path(board, 0)
+        saved_move = _saved_move(board, node["san"], known)
+        matches = _possible_moves(board, move["san"], known)
+        if matches != [saved_move]:
+            raise ValueError(_not_continued(board, path, saved_move, move["san"], matches))
+        _merge_move(node, move, board, path, known)
+        board.push(saved_move)
+
+
+def _merge_move(
+    node: dict[str, Any], part: dict[str, Any], board: chess.Board, path: str, known: dict[str, str]
+) -> None:
+    """Merge the part's move into the saved game's node, the same move, at path: board is the
+    position before it. What the part gives replaces the node's; the node's variations are merged
+    with the part's."""
+    if "comment" in part:
+        node["comment"] = part["comment"]
+    given = "nags" in part or _split_suffix(part["san"])[1] is not None
+    nags = _nags(part if given else node)
+    if nags or "nags" in node or "nags" in part:
+        node["nags"] = nags
+    node["san"] = _split_suffix(part["san"])[0]
+    lines = [line for line in part.get("variations", []) if line]
+    if not lines:
+        return
+    variations = node.setdefault("variations", [])
+    # A line goes into the first variation from before the part that begins with its move and
+    # that no earlier line of the part went into; any other is added after them.
+    before, used = len(variations), set()
+    for line in lines:
+        matches = _possible_moves(board, line[0]["san"], known)
+        for number, variation in enumerate(variations[:before], start=1):
+            if (
+                variation
+                and number not in used
+                and matches == [_saved_move(board, variation[0]["san"], known)]
+            ):
+                used.add(number)
+                _merge_line(variation, 0, line, board.copy(), f"{path}/v{number}/", known)
+                break
+        else:
+            variations.append(line)
+
+
+def _not_continued(
+    board: chess.Board, path: str, saved_move: chess.Move, san: str, matches: list[chess.Move]
+) -> str:
+    """Why the part's san at path is not the saved game's move there."""
+    expected = board.san(saved_move)
+    if len(matches) > 1:
+        return (
+            f"the picture in {san!r} at {path} could be more than one piece, and the saved game "
+            f"continues with {expected} there: give the piece's letter in the move, or in pieces"
+        )
+    why = "" if matches else ", which is not a legal move there"
+    return (
+        f"the saved game continues with {expected} at {path}, not {san!r}{why}: a part's move "
+        f"there is {expected}, with an alternative in that move's variations; if the saved move "
+        "is wrong, build the game again without after"
+    )
 
 
 def _outline(pgn: str) -> str:
@@ -665,6 +939,15 @@ def _split_suffix(san: str) -> tuple[str, str | None]:
     return (san[: suffix.start()], suffix[1]) if suffix else (san, None)
 
 
+def _nags(move: Mapping[str, Any]) -> list[int]:
+    """The move's nags, with the one its san's suffix annotation gives."""
+    nags = list(move.get("nags", []))
+    suffix = _split_suffix(move["san"])[1]
+    if suffix and _SUFFIX_NAGS[suffix] not in nags:
+        nags.append(_SUFFIX_NAGS[suffix])
+    return nags
+
+
 def _add_line(
     parent: chess.pgn.GameNode,
     line: list[MoveSpec],
@@ -682,10 +965,7 @@ def _add_line(
     for index, move_spec in enumerate(line):
         board = parent.board()
         path = f"{prefix}{_move_path(board, 0)}"
-        san, suffix = _split_suffix(move_spec["san"])
-        nags = list(move_spec.get("nags", []))
-        if suffix and _SUFFIX_NAGS[suffix] not in nags:
-            nags.append(_SUFFIX_NAGS[suffix])
+        san, nags = _split_suffix(move_spec["san"])[0], _nags(move_spec)
         try:
             move = _parse(board, reading.move(san, path))
         except ValueError as error:
@@ -797,7 +1077,7 @@ def write_pgn(
         where = Path(store)
         for name in names:
             if not (_GAME_NAME.fullmatch(name) and (where / f"{name}.pgn").is_file()):
-                saved = ", ".join(sorted(file.stem for file in where.glob("*.pgn"))) or "none"
+                saved = _saved_names(store)
                 raise ValueError(
                     f"no game saved as {name!r}; the games saved are: {saved}{unsaved}"
                 )

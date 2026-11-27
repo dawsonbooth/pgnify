@@ -170,7 +170,7 @@ pgnify writes these files:
 - The working folder: `.pgnify/` inside `--out`, or `~/.local/state/pgnify/` without `--out`, which several sessions can share. It holds:
   - a log of every tool call;
   - the book each PGN file came from;
-  - a folder for each book, with the pictures the server extracted, the pages it showed, the games it saved and the pieces it read the book's figurines as.
+  - a folder for each book, with the pictures the server extracted, the pages it showed, the games it saved and the spec each was built from, and the pieces it read the book's figurines as.
 
 Without `--out`, games saved by name with `build_pgn` belong to the session that saved them, so after a restart the assistant must build them again. PGN files already written are unaffected.
 
@@ -238,6 +238,12 @@ Use pgnify on books you own, for your own study. A PGN made with it holds the bo
 ## Copying comments from the book
 
 `build_pgn` can copy a comment from the book, so that the model need not retype it. The model names the page, the words a passage begins with and the words it ends with, which in an EPUB may be on the next page, and `build_pgn` copies the passage exactly, or fails and copies nothing. In an EPUB it keeps the book's paragraph breaks; a PDF has no such marks, and a copy there stays on its page, with the model setting its paragraphs apart. A copy can correct a misprint with a fix, and `build_pgn` reports each copy, each fix, and any passage copied twice within one build. Given each figurine's piece letter, from the book's key, as `pieces`, `build_pgn` writes the letters for the figurines in every comment, whether a picture, a Unicode figurine or a chess font's code. On a scanned book, a copy has whatever misreadings the scan's text layer has, and an OCR reading is never copied from.
+
+## Building a game in parts
+
+A long game need not be built in one call. `build_pgn` with a name saves the game, and a later call with the same name and `after` adds a part to it: `after` is the path of a move in the saved game, such as `12b` or `3w/v1/3b`, or `start` for its starting position, and the part's moves are played from there. Where the saved game already has a move, the part's move must be the same move, however it is written, and where the saved line ends, the rest of the part's line is added. On a move both have, the comment and the nags the part gives replace the game's, and what it leaves out stays, so a passage that runs onto the next page can be given again whole. A part adds moves and lines but takes none away: to correct a move, the model builds the game again without `after`.
+
+`build_pgn` saves the merged game only if it builds without errors, whose paths number the whole game; otherwise the game saved before stays as it was. It builds the merged game as it builds a game given whole, reading copies, figurines and `pieces` over the whole game, and `write_pgn` writes it as it writes any saved game.
 
 ## Commands
 

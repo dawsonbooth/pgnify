@@ -112,6 +112,16 @@ def test_build_pgn_says_how_a_comment_copies_from_the_book(primer: Path, tmp_pat
     assert "pieces, optional" in description
 
 
+def test_build_pgn_takes_after_and_describes_building_in_parts(
+    primer: Path, tmp_path: Path
+) -> None:
+    tool = _tools(primer, tmp_path)["build_pgn"]
+    assert "after" in tool.input_schema["properties"]
+    said = " ".join((tool.description or "").split())
+    assert "after, optional, with name: the spec is a part of the game saved under name" in said
+    assert 'or "start" for the game\'s starting position' in said
+
+
 def test_build_pgn_takes_pieces_and_applies_them_to_the_comments_it_copies(
     primer: Path, tmp_path: Path
 ) -> None:
@@ -245,6 +255,7 @@ def test_the_log_keeps_the_pieces_build_pgn_was_given(primer: Path, tmp_path: Pa
     (entry,) = [json.loads(line) for line in (tmp_path / ".pgnify" / "log.jsonl").open()]
     assert entry["arguments"] == {
         "name": None,
+        "after": None,
         "spec": {"start_fen": None, "moves": 0},
         "pieces": pieces,
     }
@@ -373,7 +384,7 @@ def test_saved_games_and_figurine_readings_are_kept_per_book(
     assert unnamed.is_error and "name the book this game is from" in _text(unnamed)
     (folder,) = (tmp_path / "out" / ".pgnify" / "books").iterdir()
     assert folder.name.startswith("two-pages-")
-    assert [game.name for game in (folder / "games").iterdir()] == ["a.pgn"]
+    assert [game.name for game in (folder / "games").glob("*.pgn")] == ["a.pgn"]
 
 
 def test_write_pgn_writes_a_file_named_for_the_book_by_default(
@@ -578,6 +589,63 @@ def _saved_text(out: Path, book: str, name: str) -> str:
         path for path in (out / ".pgnify" / "books").iterdir() if path.name.startswith(book)
     )
     return (folder / "games" / f"{name}.pgn").read_text()
+
+
+def test_build_pgn_adds_a_part_to_a_game_saved_and_logs_after(
+    books_folder: Path, tmp_path: Path
+) -> None:
+    out = tmp_path / "out"
+    whole = {"headers": {"Event": "E"}, "moves": move_specs("e4", "e5", "Nf3")}
+    first = {"headers": {"Event": "E"}, "moves": move_specs("e4")}
+    part = {"moves": move_specs("e5", "Nf3")}
+    built, added, *_ = call_tools(
+        books_folder,
+        out,
+        [
+            ("build_pgn", {"spec": first, "name": "a", "book": "two-pages.pdf"}),
+            ("build_pgn", {"spec": part, "name": "a", "after": "1w", "book": "two-pages.pdf"}),
+            ("build_pgn", {"spec": whole, "name": "b", "book": "two-pages.pdf"}),
+        ],
+    )
+    assert not built.is_error and not added.is_error, added.content
+    assert added.structured_content["saved"] == "a" and added.structured_content["replaced"]
+    assert added.structured_content["plies"] == 3
+    assert _saved_text(out, "two-pages", "a") == _saved_text(out, "two-pages", "b")
+    entries = [json.loads(line) for line in (out / ".pgnify" / "log.jsonl").open()]
+    assert [entry["arguments"].get("after") for entry in entries[:3]] == [None, "1w", None]
+    assert entries[1]["result"]["plies"] == 3
+
+
+def test_a_part_keeps_a_field_it_leaves_out_and_replaces_one_it_gives_empty(
+    books_folder: Path, tmp_path: Path
+) -> None:
+    first = {"comment": "Intro.", "moves": [{"san": "e4", "comment": "King.", "nags": [1]}]}
+    keeps = {"moves": [{"san": "e4"}], "result": "1-0"}
+    clears = {"comment": "", "moves": [{"san": "e4", "comment": "", "nags": []}]}
+
+    def added(spec: Any, folder: str) -> tuple[str, str]:
+        out = tmp_path / folder
+        _, result = call_tools(
+            books_folder,
+            out,
+            [
+                ("build_pgn", {"spec": first, "name": "a", "book": "two-pages.pdf"}),
+                (
+                    "build_pgn",
+                    {"spec": spec, "name": "a", "after": "start", "book": "two-pages.pdf"},
+                ),
+            ],
+        )
+        assert not result.is_error, result.content
+        return result.structured_content["outline"], _saved_text(out, "two-pages", "a")
+
+    outline, text = added(keeps, "keeps")
+    assert "Intro." in outline and "King." in outline and "$1" in text and "1-0" in text
+    outline, text = added(clears, "clears")
+    assert "Intro." not in outline and "King." not in outline and "$1" not in text
+    # JSON text is read as the object it holds, and keeps a field it leaves out as well.
+    outline, text = added('{"moves": [{"san": "e4"}]}', "text")
+    assert "King." in outline and "$1" in text
 
 
 def test_write_pgn_names_the_saved_games_no_file_holds(books_folder: Path, tmp_path: Path) -> None:

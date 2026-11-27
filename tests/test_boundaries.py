@@ -347,6 +347,34 @@ def test_a_game_saved_from_a_book_is_unwritten_until_a_file_in_a_folder_holds_it
     assert outputs.unwritten(book) == []
 
 
+def test_unwritten_lists_a_game_built_in_parts_by_its_name_alone(
+    outputs: Outputs, book: Book
+) -> None:
+    games = outputs.book_folder(book).games
+    games.mkdir(parents=True)
+    build_pgn({"moves": move_specs("e4")}, name="a", store=str(games))
+    build_pgn({"moves": move_specs("e5")}, name="a", store=str(games), after="1w")
+    assert sorted(path.name for path in games.iterdir()) == ["a.pgn", "a.spec.json"]
+    assert outputs.unwritten(book) == ["a"]
+    path = outputs.target("Silman/Games", book, replace=False)
+    path.parent.mkdir()
+    path.write_text((games / "a.pgn").read_text())
+    outputs.wrote(path, book, ["a"], "")
+    assert outputs.unwritten(book) == []
+
+
+def test_a_link_where_a_games_record_belongs_is_refused(
+    outputs: Outputs, book: Book, tmp_path: Path
+) -> None:
+    games = outputs.book_folder(book).games
+    games.mkdir(parents=True)
+    build_pgn({"moves": move_specs("e4")}, name="a", store=str(games))
+    (games / "a.spec.json").unlink()
+    (games / "a.spec.json").symlink_to(tmp_path / "elsewhere.json")
+    with pytest.raises(ValueError, match=r"a\.spec\.json in pgnify's output folder is a link"):
+        outputs.book_folder(book)
+
+
 @pytest.mark.parametrize(
     ("name", "file"),
     [("Chapter 5 (forks)", "Chapter 5 (forks).pgn"), ("Chapter 1.PGN", "Chapter 1.pgn")],

@@ -111,7 +111,11 @@ comment, copied or typed, each such picture mark and character becomes its lette
 picture in pieces is that piece, and a move not legal with it is an error.
 Give every figurine a copy may carry: pgnify has no table of figurines of its own. A comment that
 still holds a Unicode figurine is listed in the result's figurines_left, {path, figurines}, and is
-no error, since a book's key may quote its figurines."""
+no error, since a book's key may quote its figurines.
+In a game built in parts, a part's pieces add to those its earlier parts gave, and a key given
+again takes the later letter throughout the game; a part whose pieces read a saved move's picture
+as another piece is refused, and a build without after keeps none of the pieces earlier parts
+gave."""
 
 
 def build_pgn_description() -> str:
@@ -127,15 +131,28 @@ def build_pgn(
     figurines: str | None = None,
     book: str | None = None,
     pieces: dict[str, str] | None = None,
+    after: str | None = None,
 ) -> dict[str, Any]:
     """build_pgn, copying the passages the spec's comments name from the book at the path book,
-    and reading the figurines as PIECES says. ValueError for pieces that are not as it says."""
-    pictures, characters = _lettered(pieces)
+    and reading the figurines as PIECES says. With after, the spec is a part of the game saved as
+    name, merged into it and built whole, its pieces added to those the game's builds gave.
+    ValueError for pieces that are not as PIECES says, and for a part that cannot be added."""
+    others = chess_tools.read_figurines(figurines, besides=name)
+    whole = chess_tools.read_spec(spec)
+    if after is None:
+        game_pieces = pieces
+        pictures, characters = _lettered(game_pieces)
+    else:
+        record = chess_tools.saved_game(name, store)
+        game_pieces = {**record["pieces"], **(pieces or {})}
+        pictures, characters = _lettered(game_pieces)
+        _keep_saved_moves(pictures, record["pictures"])
+        known = others | record["pictures"] | pictures
+        whole = chess_tools.merge_part(record, whole, after, known)
     with _Pages(book) as pages:
         copier = _Copier(pages, characters)
         # What the model gives overrides what an earlier game read.
-        known = chess_tools.read_figurines(figurines, besides=name) | pictures
-        built = chess_tools.build_game(spec, known, copier.text)
+        built = chess_tools.build_game(whole, others | pictures, copier.text)
     errors = [_with_pieces(error, pictures) for error in built["errors"]]
     built = {
         **built,
@@ -146,7 +163,9 @@ def build_pgn(
         result = built
     else:
         assert store is not None, "a game saved by name needs a store"
-        result = chess_tools.save_built(built, name, store, figurines)
+        result = chess_tools.save_built(
+            built, name, store, figurines, {"spec": whole, "pieces": game_pieces or {}}
+        )
     for key in ("copied", "fixed", "repeated", "figurines_left"):
         if found := getattr(copier, key):
             result[key] = found
@@ -178,6 +197,22 @@ def _lettered(pieces: dict[str, str] | None) -> tuple[dict[str, str], dict[str, 
         raise ValueError("pieces: " + "; ".join(said))
     pictures = {key: letter for key, letter in pieces.items() if _IDENTIFIER.fullmatch(key)}
     return pictures, {key: letter for key, letter in pieces.items() if key not in pictures}
+
+
+def _keep_saved_moves(pictures: dict[str, str], read: dict[str, str]) -> None:
+    """ValueError when pictures, the letters the pieces give, read a picture as another piece than
+    read, the pieces the saved game's moves read the pictures as."""
+    changed = [
+        f"pieces gives the picture {picture} as {letter}, where the saved game read it as "
+        f"{read[picture]}"
+        for picture, letter in pictures.items()
+        if picture in read and read[picture] != letter
+    ]
+    if changed:
+        raise ValueError(
+            "; ".join(changed) + ": a part cannot change a saved move, so leave each such picture "
+            "out of pieces, or build the game again without after"
+        )
 
 
 def _with_pieces(error: dict[str, Any], pictures: dict[str, str]) -> dict[str, Any]:

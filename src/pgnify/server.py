@@ -255,6 +255,7 @@ def build_server(books: Path | None, out: Path | None, state: Path | None = None
     def build_pgn(
         spec: Any,
         name: str | None = None,
+        after: str | None = None,
         book: book_type = None,
         pieces: dict[str, str] | None = None,
         *,
@@ -268,9 +269,16 @@ def build_server(books: Path | None, out: Path | None, state: Path | None = None
             store = str(outputs.book_folder(b).games) if b else None
             figurines = calls.figurines(b)
             path = str(b.path) if b else None
-            return copies.build_pgn(spec, name, store, figurines, book=path, pieces=pieces)
+            return copies.build_pgn(
+                spec, name, store, figurines, book=path, pieces=pieces, after=after
+            )
 
-        arguments = {"name": name, "spec": _spec_summary(spec), "pieces": pieces}
+        arguments = {
+            "name": name,
+            "after": after,
+            "spec": _spec_summary(spec),
+            "pieces": pieces,
+        }
         return calls.run("build_pgn", arguments, book, build, needs_book=False, readable=readable)
 
     def write_pgn(
